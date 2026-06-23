@@ -48,6 +48,6 @@ class StopWorkBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": "Heat Stress",
-            "manufacturer": "La Isla Network / Heat Guidance Calculator",
+            "manufacturer": "Heat Guidance Calculator",
             "model": "heat-guidance-calculator.pages.dev",
         }
