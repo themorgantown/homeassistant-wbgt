@@ -32,7 +32,9 @@
           "acclimatization": "Acclimatization status",
           "shift_start": "Shift start (HH:MM)",
           "shift_end": "Shift end (HH:MM)",
-          "clothing": "Clothing / PPE type"
+          "clothing": "Clothing / PPE type",
+          "country": "Country (ISO code; blank = global standards only)",
+          "state": "US state (blank = federal + global only)"
         }
       }
     },
@@ -68,6 +70,8 @@
           "shift_start": "Shift start (HH:MM)",
           "shift_end": "Shift end (HH:MM)",
           "clothing": "Clothing / PPE type",
+          "country": "Country (ISO code; blank = global standards only)",
+          "state": "US state (blank = federal + global only)",
           "update_interval_minutes": "Update interval (minutes)"
         }
       }

@@ -54,6 +54,15 @@ ALWAYS_PRESENT = [
     "derivedOutputs.hydration.mlPerBreak",
     "derivedOutputs.hydration.hyponatremiaCeiling",
 ]
+# Per-standard fields the coordinator reads to scope the composite to the
+# user's jurisdiction (_scope_composite / _standard_in_scope). The integration
+# no longer trusts the API's global `composite`; it recomputes from results[].
+RESULTS_FIELDS = [
+    "results[].applicable",
+    "results[].jurisdiction",
+    "results[].countryCode",
+    "results[].recommendation.stopWork",
+]
 # Fields present only when a schedule is produced (omitted under stop-work).
 SCHEDULE_ONLY = [
     "composite.workMinutesPerHour",
@@ -86,6 +95,13 @@ def _assert_present(body, paths):
     assert not missing, f"missing or null fields the integration reads: {missing}"
 
 
+def _assert_reachable(body, paths):
+    """Like _assert_present but tolerates null values (e.g. countryCode is
+    legitimately null for global standards) — only the key must exist."""
+    missing = [p for p in paths if _get(body, p) is _MISSING]
+    assert not missing, f"unreachable fields the integration reads: {missing}"
+
+
 def _compare(payload):
     resp = requests.post(f"{API_BASE}/api/v1/compare", json=payload, timeout=TIMEOUT)
     assert resp.status_code == 200, resp.text
@@ -115,6 +131,19 @@ def test_stop_work_scenario_flags_stop_work():
     _assert_present(body, ALWAYS_PRESENT)
     assert _get(body, "composite.stopWork") is True
     assert _get(body, "derivedOutputs.hydration.mlPerHr") > 0
+
+
+def test_results_carry_jurisdiction_fields():
+    """The integration scopes guidance to the user's country/state by reading
+    each standard's jurisdiction tags and recommendation from results[]. Guard
+    that contract so a server-side rename doesn't silently break scoping."""
+    body = _compare(NORMAL)
+    results = body.get("results")
+    assert isinstance(results, list) and results, "results[] must be a non-empty list"
+    _assert_reachable(body, RESULTS_FIELDS)
+    # At least one global standard (countryCode null) must exist — these are the
+    # baseline that always applies regardless of the user's jurisdiction scope.
+    assert any(r.get("countryCode") is None for r in results), "expected ≥1 global standard"
 
 
 def test_weather_endpoint_returns_hourly_wbgt():

@@ -20,12 +20,13 @@ async def async_setup_entry(
 
 
 class StopWorkBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_icon = "mdi:hand-back-right-off"
 
     def __init__(self, coordinator: HeatStressCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_name = "Heat Stress Stop Work"
+        self._attr_name = "Stop Work"
         self._attr_unique_id = f"{entry.entry_id}_stop_work"
         self._entry = entry
 
@@ -46,7 +47,7 @@ class StopWorkBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def device_info(self):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Heat Stress Guidance",
+            "name": "Heat Stress",
             "manufacturer": "La Isla Network / Heat Guidance Calculator",
             "model": "heat-guidance-calculator.pages.dev",
         }

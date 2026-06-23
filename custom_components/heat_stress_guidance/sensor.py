@@ -33,6 +33,8 @@ def _common_attrs(data: dict) -> dict:
     return {
         "contributing_standards": data.get("contributing_standards", []),
         "advisory_standards": data.get("advisory_standards", []),
+        "triggered_by": data.get("triggered_by"),
+        "jurisdiction_scope": data.get("jurisdiction_scope"),
         "acclimatization": data.get("acclimatization"),
         "clothing": data.get("clothing"),
         "effective_wbgt_c": data.get("effective_wbgt_c"),
@@ -40,6 +42,8 @@ def _common_attrs(data: dict) -> dict:
 
 
 class _HeatStressSensor(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
+
     def __init__(self, coordinator: HeatStressCoordinator, entry: ConfigEntry, key: str, name: str) -> None:
         super().__init__(coordinator)
         self._key = key
@@ -55,7 +59,7 @@ class _HeatStressSensor(CoordinatorEntity, SensorEntity):
     def device_info(self):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Heat Stress Guidance",
+            "name": "Heat Stress",
             "manufacturer": "La Isla Network / Heat Guidance Calculator",
             "model": "heat-guidance-calculator.pages.dev",
         }
@@ -63,7 +67,7 @@ class _HeatStressSensor(CoordinatorEntity, SensorEntity):
 
 class WbgtSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "wbgt_c", "Heat Stress WBGT")
+        super().__init__(coordinator, entry, "wbgt_c", "WBGT")
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         self._attr_icon = "mdi:thermometer-water"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -75,7 +79,7 @@ class WbgtSensor(_HeatStressSensor):
 
 class RiskLevelSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "risk_level", "Heat Stress Risk Level")
+        super().__init__(coordinator, entry, "risk_level", "Risk Level")
         self._attr_icon = "mdi:alert-circle"
 
     @property
@@ -85,7 +89,7 @@ class RiskLevelSensor(_HeatStressSensor):
 
 class WorkMinutesSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "work_minutes", "Heat Stress Work Minutes")
+        super().__init__(coordinator, entry, "work_minutes", "Work Minutes")
         self._attr_native_unit_of_measurement = "min/hr"
         self._attr_icon = "mdi:briefcase-clock"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -97,7 +101,7 @@ class WorkMinutesSensor(_HeatStressSensor):
 
 class RestMinutesSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "rest_minutes", "Heat Stress Rest Minutes")
+        super().__init__(coordinator, entry, "rest_minutes", "Rest Minutes")
         self._attr_native_unit_of_measurement = "min/hr"
         self._attr_icon = "mdi:sleep"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -109,7 +113,7 @@ class RestMinutesSensor(_HeatStressSensor):
 
 class HydrationMlPerHrSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "hydration_ml_per_hr", "Heat Stress Hydration")
+        super().__init__(coordinator, entry, "hydration_ml_per_hr", "Hydration")
         self._attr_native_unit_of_measurement = "mL/h"
         self._attr_icon = "mdi:water"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -129,7 +133,7 @@ class HydrationOzPerHrSensor(_HeatStressSensor):
     _ML_PER_OZ = 29.5735
 
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "hydration_oz_per_hr", "Heat Stress Hydration Ounces")
+        super().__init__(coordinator, entry, "hydration_oz_per_hr", "Hydration Ounces")
         self._attr_native_unit_of_measurement = "fl oz/h"
         self._attr_icon = "mdi:cup-water"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -150,7 +154,7 @@ class HydrationOzPerHrSensor(_HeatStressSensor):
 
 class BreakMlSensor(_HeatStressSensor):
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "hydration_ml_per_break", "Heat Stress Break mL")
+        super().__init__(coordinator, entry, "hydration_ml_per_break", "Break mL")
         self._attr_native_unit_of_measurement = "mL"
         self._attr_icon = "mdi:cup-water"
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -164,7 +168,7 @@ class ActiveWorkloadSensor(_HeatStressSensor):
     """Current workload level being sent to the API — static config or MQTT-derived."""
 
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator, entry, "active_workload", "Heat Stress Active Workload")
+        super().__init__(coordinator, entry, "active_workload", "Active Workload")
         self._attr_icon = "mdi:run"
 
     @property

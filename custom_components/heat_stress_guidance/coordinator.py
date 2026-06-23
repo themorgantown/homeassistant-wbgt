@@ -14,11 +14,13 @@ from .const import (
     CONF_ACCLIMATIZATION,
     CONF_API_URL,
     CONF_CLOTHING,
+    CONF_COUNTRY,
     CONF_GLOBE_TEMP_ENTITY,
     CONF_HUMIDITY_ENTITY,
     CONF_LATITUDE,
     CONF_LOCATION_ENTITY,
     CONF_LONGITUDE,
+    CONF_STATE,
     CONF_MOTION_THRESHOLD_HEAVY,
     CONF_MOTION_THRESHOLD_LIGHT,
     CONF_MOTION_THRESHOLD_MODERATE,
@@ -43,6 +45,8 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WORKLOAD,
     DOMAIN,
+    GLOBAL_JURISDICTIONS,
+    US_STATE_JURISDICTIONS,
     WEATHER_MODE_HA_SENSORS,
     WEATHER_MODE_LOCATION,
     WEATHER_MODE_MANUAL_WBGT,
@@ -75,6 +79,80 @@ def _estimate_wbgt(t_c: float, rh: float, globe_c: float | None) -> float:
     nwb = _stull_wet_bulb(t_c, rh)
     tg = globe_c if globe_c is not None else t_c
     return round(0.7 * nwb + 0.3 * tg, 1)
+
+
+def _standard_in_scope(result: dict, country: str, state: str) -> bool:
+    """Is an API standard relevant to the user's country/state?
+
+    Global standards always apply. Otherwise the standard's country must match;
+    for the US, state-specific standards apply only in their own state while
+    federal standards apply everywhere. A blank country scopes to global-only.
+    """
+    jurisdiction = result.get("jurisdiction")
+    if jurisdiction in GLOBAL_JURISDICTIONS:
+        return True
+    country_code = result.get("countryCode")
+    if not country_code:
+        return False  # region-only (e.g. european_union) or untagged
+    if not country or country_code != country:
+        return False
+    if country == "US" and jurisdiction in US_STATE_JURISDICTIONS:
+        return US_STATE_JURISDICTIONS[jurisdiction] == state
+    return True
+
+
+def _standard_label(result: dict) -> str:
+    return result.get("displayName") or result.get("standardId") or "unknown"
+
+
+def _scope_composite(results: list, country: str, state: str) -> dict:
+    """Recompute the composite over only the standards in the user's scope.
+
+    Mirrors the API's "most protective wins" rule, but restricted to relevant
+    jurisdictions: any in-scope standard requiring stop-work wins; otherwise the
+    schedule with the fewest work minutes per hour is the binding one.
+    """
+    scoped = [
+        r for r in results
+        if r.get("applicable") and _standard_in_scope(r, country, state)
+    ]
+    stop = [r for r in scoped if (r.get("recommendation") or {}).get("stopWork")]
+    advisory = [_standard_label(r) for r in scoped]
+
+    if stop:
+        return {
+            "stopWork": True,
+            "workMinutesPerHour": None,
+            "restMinutesPerHour": None,
+            "contributingStandards": [_standard_label(r) for r in stop],
+            "advisoryStandards": advisory,
+            "triggeredBy": _standard_label(stop[0]),
+        }
+
+    scheduled = [
+        r for r in scoped
+        if (r.get("recommendation") or {}).get("workMinutesPerHour") is not None
+    ]
+    if scheduled:
+        best = min(scheduled, key=lambda r: r["recommendation"]["workMinutesPerHour"])
+        rec = best["recommendation"]
+        return {
+            "stopWork": False,
+            "workMinutesPerHour": rec.get("workMinutesPerHour"),
+            "restMinutesPerHour": rec.get("restMinutesPerHour"),
+            "contributingStandards": [_standard_label(best)],
+            "advisoryStandards": advisory,
+            "triggeredBy": _standard_label(best),
+        }
+
+    return {
+        "stopWork": False,
+        "workMinutesPerHour": None,
+        "restMinutesPerHour": None,
+        "contributingStandards": [],
+        "advisoryStandards": advisory,
+        "triggeredBy": None,
+    }
 
 
 def _derive_risk_level(composite: dict) -> str:
@@ -271,7 +349,15 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         self._failure_count = 0
         self.update_interval = base_interval
 
-        composite = result.get("composite") or {}
+        # Scope the guidance to the user's jurisdiction. The API's own `composite`
+        # is computed across every standard worldwide; we instead recompute it
+        # over only the standards relevant to the configured country/state. Fall
+        # back to the API composite if the response carries no per-standard list.
+        country = (self._config.get(CONF_COUNTRY) or self.hass.config.country or "").upper()
+        state = (self._config.get(CONF_STATE) or "").upper()
+        results = result.get("results") or []
+        composite = _scope_composite(results, country, state) if results else (result.get("composite") or {})
+
         derived = result.get("derivedOutputs") or {}
         hydration = derived.get("hydration") or {}
         input_summary = result.get("inputSummary") or {}
@@ -295,6 +381,8 @@ class HeatStressCoordinator(DataUpdateCoordinator):
             "hyponatremia_ceiling": hydration.get("hyponatremiaCeiling", False),
             "contributing_standards": composite.get("contributingStandards", []),
             "advisory_standards": composite.get("advisoryStandards", []),
+            "triggered_by": composite.get("triggeredBy"),
+            "jurisdiction_scope": f"{country}/{state}" if state else (country or "global"),
             "clothing": self._config.get(CONF_CLOTHING, DEFAULT_CLOTHING),
             "acclimatization": self._config.get(CONF_ACCLIMATIZATION, DEFAULT_ACCLIMATIZATION),
             "active_workload": active_workload,

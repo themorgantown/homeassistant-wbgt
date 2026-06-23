@@ -47,7 +47,7 @@ Eight entities will appear under the integration. That's it.
 | `sensor.heat_stress_break_ml` | How much to drink at each rest break — `hydration ÷ (60 ÷ work_minutes)`. |
 | `binary_sensor.heat_stress_stop_work` | **On** when one or more applicable standards require all work to stop. Trigger alerts and automations off this. |
 
-All entities carry extra state attributes: `contributing_standards` (which standards drove the result), `acclimatization`, `clothing`, and `effective_wbgt_c` (WBGT after clothing adjustment factor).
+All entities carry extra state attributes: `contributing_standards` (which standards drove the result), `triggered_by` (the single binding standard), `jurisdiction_scope` (the country/state the guidance is scoped to), `acclimatization`, `clothing`, and `effective_wbgt_c` (WBGT after clothing adjustment factor).
 
 **Example:** WBGT 31°C, heavy work, unacclimatized → `work_minutes: 30`, `rest_minutes: 30`, `hydration: 500 mL/h`. A worker does 30 minutes of work, then rests 30 minutes in shade and drinks ~250 mL.
 
@@ -205,6 +205,12 @@ After restart, the entity `sensor.wbgt_noaa` will appear. In the integration set
 | Shift start | HH:MM (e.g. `07:00`) | Used by standards that apply time-of-day limits |
 | Shift end | HH:MM (e.g. `15:00`) | |
 | Clothing / PPE | Standard work / SMS coveralls / Polyolefin / Double-layer / Vapor-barrier suit | Heavier PPE traps heat — this applies a clothing adjustment factor to WBGT |
+| **Country** | ISO country code (e.g. `US`), or blank | **Scopes which standards apply.** Defaults to your Home Assistant country. Blank = global standards only. |
+| **US state** | e.g. `NY`, or blank | Only used when Country is `US`. A state with its own rule (CA, CO, MD, MN, NV, OR, WA) adds it; any other state — including NY — uses US federal + global standards. |
+
+### Why country/state matters
+
+The API evaluates **all 76 worldwide standards** and, left unscoped, reports the single most-protective one — which can be a rule from an unrelated jurisdiction. For example, the **UAE Midday Break Rule** bans work 12:30–15:00 in summer *regardless of temperature*, so an unscoped setup will show **STOP WORK / critical** at a mild 22 °C for a worker in New York. Setting Country = `US` (and your state) restricts the guidance to standards that actually apply to you. Genuinely hot conditions still trigger global standards like ACGIH TLV and NIOSH, so real protection is unchanged. The active driver is shown in the `triggered_by` and `jurisdiction_scope` entity attributes.
 
 **Work intensity reference:**
 
@@ -347,6 +353,9 @@ In `ha_sensors` mode without a globe temperature sensor, the integration substit
 **Risk level stays `safe` when it should be higher**
 Check the WBGT value in `sensor.heat_stress_wbgt`. If it reads correctly, verify the work intensity setting — light-work limits are significantly higher than heavy-work limits. Also confirm acclimatization status; acclimatized workers have higher limits, so an unacclimatized worker would require a higher protection setting.
 
+**`STOP WORK` / `critical` shown when it isn't hot**
+The guidance is being driven by a standard from a jurisdiction that doesn't apply to you — most often a time-of-day work ban like the UAE Midday Break Rule. Check the `triggered_by` attribute on `sensor.heat_stress_risk_level`. Fix it by setting your **Country** (and **US state**) in the integration options so only relevant standards are considered. See [Why country/state matters](#why-countrystate-matters).
+
 **Config flow fails at the API check step**
 The integration pings the API during setup. If you see a connection error, verify the API URL (default: `https://heat-guidance-calculator.pages.dev`) is reachable from your HA host, not just your browser.
 
@@ -483,6 +492,6 @@ The practical bottom line: if your workers are in direct sun for extended period
 
 ## Standards covered
 
-The API evaluates 76 international occupational heat stress standards including NIOSH 2016, ACGIH TLV, ISO 7243, OSHA, and country-specific rules from 40+ countries. The composite result always uses the most protective (lowest work, highest rest) schedule across all applicable standards — standards are never averaged.
+The API evaluates 76 international occupational heat stress standards including NIOSH 2016, ACGIH TLV, ISO 7243, OSHA, and country-specific rules from 40+ countries. The composite result uses the most protective (lowest work, highest rest) schedule across all applicable standards — standards are never averaged. The integration scopes that composite to the standards relevant to your configured **Country** and **US state** (see [Configuration](#configuration)) so rules from unrelated jurisdictions don't drive your guidance.
 
 See the [Heat Guidance Calculator](https://heat-guidance-calculator.pages.dev) for the full standards list with thresholds and citations. This page also provides further guidance on work/rest ratios, hydration, and acclimatization.

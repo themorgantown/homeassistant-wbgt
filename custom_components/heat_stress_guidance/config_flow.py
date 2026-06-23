@@ -15,6 +15,7 @@ from .const import (
     CONF_ACCLIMATIZATION,
     CONF_API_URL,
     CONF_CLOTHING,
+    CONF_COUNTRY,
     CONF_GLOBE_TEMP_ENTITY,
     CONF_HUMIDITY_ENTITY,
     CONF_LATITUDE,
@@ -23,6 +24,7 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_SHIFT_END,
     CONF_SHIFT_START,
+    CONF_STATE,
     CONF_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WBGT_ENTITY,
@@ -35,10 +37,13 @@ from .const import (
     DEFAULT_MQTT_TOPIC,
     DEFAULT_SHIFT_END,
     DEFAULT_SHIFT_START,
+    DEFAULT_STATE,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WORKLOAD,
     DEFAULT_WORKLOAD_MODE,
     DOMAIN,
+    SUPPORTED_COUNTRIES,
+    US_STATES,
     WEATHER_MODE_HA_SENSORS,
     WEATHER_MODE_LOCATION,
     WEATHER_MODE_MANUAL_WBGT,
@@ -169,6 +174,10 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 mode_label = "MQTT" if workload_mode == WORKLOAD_MODE_MQTT else self._data.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)
                 return self.async_create_entry(title=f"Heat Stress Guidance ({mode_label})", data=self._data)
 
+        default_country = (self.hass.config.country or "").upper()
+        if default_country not in SUPPORTED_COUNTRIES:
+            default_country = ""
+
         return self.async_show_form(
             step_id="worker",
             data_schema=vol.Schema({
@@ -179,6 +188,8 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SHIFT_START, default=DEFAULT_SHIFT_START): str,
                 vol.Required(CONF_SHIFT_END, default=DEFAULT_SHIFT_END): str,
                 vol.Required(CONF_CLOTHING, default=DEFAULT_CLOTHING): vol.In(CLOTHING_OPTIONS),
+                vol.Required(CONF_COUNTRY, default=default_country): vol.In(SUPPORTED_COUNTRIES),
+                vol.Optional(CONF_STATE, default=DEFAULT_STATE): vol.In(US_STATES),
             }),
             errors=errors,
         )
@@ -260,6 +271,8 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_SHIFT_START, default=current.get(CONF_SHIFT_START, DEFAULT_SHIFT_START)): str,
                 vol.Required(CONF_SHIFT_END, default=current.get(CONF_SHIFT_END, DEFAULT_SHIFT_END)): str,
                 vol.Required(CONF_CLOTHING, default=current.get(CONF_CLOTHING, DEFAULT_CLOTHING)): vol.In(CLOTHING_OPTIONS),
+                vol.Required(CONF_COUNTRY, default=current.get(CONF_COUNTRY, (self.hass.config.country or "").upper() if (self.hass.config.country or "").upper() in SUPPORTED_COUNTRIES else "")): vol.In(SUPPORTED_COUNTRIES),
+                vol.Optional(CONF_STATE, default=current.get(CONF_STATE, DEFAULT_STATE)): vol.In(US_STATES),
                 vol.Required(CONF_UPDATE_INTERVAL, default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): vol.All(int, vol.Range(min=1, max=1440)),
             }),
             errors=errors,
