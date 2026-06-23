@@ -16,7 +16,7 @@ This is the fastest path if you don't have a local weather station.
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=themorgantown&repository=homeassistant-wbgt&category=integration)
 
-Click the button above → **Download** → restart Home Assistant.
+Click the button above → add the repository as an **Integration** → **Download** → restart Home Assistant.
 
 **2. Add the integration**
 
@@ -26,7 +26,7 @@ Or: **Settings → Integrations → Add Integration → Heat Stress Guidance**
 
 **3. Step 1 — API**: leave the API URL as the default and click Next.
 
-**4. Step 2 — Weather source**: choose **`location`**, enter your latitude and longitude ([find yours here](https://www.latlong.net)), click Next.
+**4. Step 2 — Weather source**: choose **`location`** to use fixed coordinates, or **`tracked_entity`** to use a Home Assistant `person.*` or mobile app `device_tracker.*` entity.
 
 **5. Step 3 — Worker profile**: pick the work intensity that best describes the job, set shift start/end times, and click Submit.
 
@@ -66,6 +66,16 @@ All entities carry extra state attributes: `contributing_standards` (which stand
 
 Updates are delivered automatically through HACS when new versions are released.
 
+If HACS says **Repository themorgantown/homeassistant-wbgt not found**, add it as a custom repository instead of searching the default HACS catalog:
+
+1. Open **HACS → Integrations**
+2. Click **⋮ → Custom repositories**
+3. Repository: `https://github.com/themorgantown/homeassistant-wbgt`
+4. Category: **Integration**
+5. Click **Add**, then select **Heat Stress Guidance → Download**
+
+The repository is public, but it is a custom HACS repository. A default-catalog search can report "not found" until the custom repository URL has been added.
+
 ### Manual install
 
 1. Copy `custom_components/heat_stress_guidance/` from this repo into your HA `<config>/custom_components/` directory
@@ -87,11 +97,12 @@ Setup is a 3-step wizard. All settings can be changed later via **Settings → I
 
 ### Step 2 — Weather source
 
-Three modes — choose the one that matches your setup:
+Four modes — choose the one that matches your setup:
 
 | Mode | Best when | What you'll enter |
 |---|---|---|
-| `location` | No local weather station | Latitude and longitude |
+| `location` | Fixed job site, facility, farm, or home location | Latitude and longitude |
+| `tracked_entity` | Worker/supervisor location should follow a mobile device or Home Assistant user/person | A `person.*` or `device_tracker.*` entity with GPS latitude/longitude attributes |
 | `ha_sensors` | You have an Ambient Weather, Ecowitt, Davis, or similar station already in HA | Entity IDs for temperature and humidity sensors |
 | `manual_wbgt` | You have a hardware WBGT sensor in HA, or you've set up a NOAA REST sensor (see below) | Entity ID of the WBGT sensor |
 
@@ -99,9 +110,27 @@ Three modes — choose the one that matches your setup:
 
 #### `location` mode
 
-Uses Open-Meteo forecast data for your coordinates. Good accuracy for planning; slightly lags fast-changing field conditions.
+Uses forecast WBGT data for your coordinates. Good accuracy for planning; slightly lags fast-changing field conditions.
 
-Enter your latitude and longitude as decimal degrees (e.g., `37.7749`, `-122.4194`). [Find your coordinates.](https://www.latlong.net)
+The setup form defaults to the latitude and longitude configured in Home Assistant under **Settings → System → General → Location**. You can keep those values or enter job-site coordinates manually as decimal degrees (e.g., `37.7749`, `-122.4194`). [Find coordinates manually.](https://www.latlong.net)
+
+---
+
+#### `tracked_entity` mode
+
+Uses latitude and longitude from an existing Home Assistant location entity, then fetches forecast WBGT for that current position. This is the best option when the relevant work location moves, or when you want guidance based on a supervisor's phone, a worker's phone, or a Home Assistant user/person entity.
+
+Enter an entity that exposes `latitude` and `longitude` attributes, such as:
+
+| Source | Example entity |
+|---|---|
+| Home Assistant person | `person.alex` |
+| Home Assistant mobile app device tracker | `device_tracker.alex_iphone` |
+| GPS tracker integration | `device_tracker.work_truck` |
+
+To find a valid entity, go to **Developer Tools → States**, open the `person.*` or `device_tracker.*` entity, and confirm the attributes include `latitude` and `longitude`.
+
+If the mobile device has location sharing disabled, has not reported yet, or only reports a zone name without GPS attributes, the integration will show `unavailable` until Home Assistant has a current GPS fix.
 
 ---
 
@@ -307,7 +336,10 @@ automation:
 ## Troubleshooting
 
 **Entities show `unavailable`**
-The integration cannot reach the API. Check that your HA instance has internet access and that the API URL in the integration settings is reachable. To test: open `https://heat-guidance-calculator.pages.dev/api/v1/health` in a browser from the same network as HA.
+The integration cannot reach the API. Check that your HA instance has internet access and that the API URL in the integration settings is reachable. To test: open `https://heat-guidance-calculator.pages.dev/health` in a browser from the same network as HA.
+
+**`tracked_entity` mode shows `unavailable`**
+Open **Developer Tools → States** and inspect the configured `person.*` or `device_tracker.*` entity. It must expose numeric `latitude` and `longitude` attributes. If those attributes are missing, enable location permission/background location for the Home Assistant mobile app or choose fixed `location` mode.
 
 **WBGT reading seems too low on a sunny day**
 In `ha_sensors` mode without a globe temperature sensor, the integration substitutes dry-bulb temperature for Tg. This understates radiant heat in direct sunlight. For outdoor sunny conditions, use `location` mode or a hardware globe/WBGT sensor.
@@ -340,6 +372,112 @@ pytest tests/test_api_contract.py -v
 ```
 
 Point it at a different API instance with `HGC_API_BASE` (e.g. `HGC_API_BASE=http://localhost:8788 pytest tests/test_api_contract.py`). When you change which response fields the integration reads in `custom_components/heat_stress_guidance/coordinator.py`, update the field lists at the top of the test to match.
+
+---
+
+## Why WBGT is the right metric for outdoor labor
+
+When it's 95°F and sunny, what you actually need to know isn't the air temperature — it's how hot your body is going to get. You know the difference between a humid, shaded 95°F and a dry, sunny 95°F. The first is tolerable; the second can be very uncomfortable and dangerous. The difference is **radiant heat load** and your body's ability to dissipate heat via sweat.  
+
+### What simpler metrics miss
+
+The number on a weather app is a dry-bulb air temperature: a thermometer in a shaded, ventilated box. It's useful for planning but tells you nothing about whether a worker digging a trench can safely stay out there.
+
+The NWS **heat index** (the "feels like" number) improves on this by folding in relative humidity. But it was designed for a sedentary person standing in shade, and it has a critical blind spot: it ignores direct solar radiation entirely. On a clear July afternoon, standing in full sun adds the equivalent of 7–15°C to your physiological heat load compared to standing in shade at the same temperature and humidity. Heat index sees none of that.
+
+**Wet-bulb globe temperature (WBGT)** was developed in the 1950s by the US military specifically to predict heat casualties during training exercises. It captures four things simultaneously: air temperature, humidity, radiant heat from the sun and ground, and wind speed. Every one of those variables affects how fast your core body temperature rises. WBGT is not a "feels like" approximation — it's a physiological load measurement. That's why NIOSH, ACGIH, ISO 7243, OSHA, and militaries worldwide all use it as their standard.
+
+### The formula and what each term means
+
+For outdoor conditions in direct sunlight:
+
+```
+WBGT = 0.7 × Tnwb + 0.2 × Tg + 0.1 × Ta
+```
+
+- **Tnwb — natural wet-bulb temperature (70% weight):** The temperature of a water-soaked wick freely exposed to ambient air, without forced ventilation. It measures how much evaporative cooling is available given the current humidity and air movement. This term dominates because sweat evaporation is the human body's primary heat defense. High humidity collapses the evaporation gradient and your core temperature climbs fast.
+
+- **Tg — globe temperature (20% weight):** The temperature inside a hollow black copper sphere — typically 15 cm diameter, painted flat black — sitting in the open. It equilibrates where radiation absorbed from sun, sky, and ground reflection equals heat lost by convection. A globe thermometer reading of 60°C on a summer afternoon isn't unusual. This term captures what no humidity formula can: the radiant heat load from a cloudless sky.
+
+- **Ta — dry-bulb temperature (10% weight):** Ordinary air temperature in shade. It matters least on its own.
+
+The 70/20/10 weighting reflects measured physiological reality. Humidity is king. Radiant load is a major secondary driver. Air temperature alone is a distant third.
+
+For indoor or shade conditions where there's no direct solar load:
+
+```
+WBGT = 0.7 × Tnwb + 0.3 × Tg
+```
+
+The globe and wet-bulb split shifts because radiant sources inside buildings (hot machinery, furnaces, metal walls) can still be significant even without the sun.
+
+### How the NWS calculates WBGT
+
+The National Weather Service doesn't deploy physical globe thermometers at every weather station — there are too many grid points. Instead, they generate WBGT forecasts using a numerical model developed by Liljegren et al. (2008) at Argonne National Laboratory. The inputs are things standard weather stations and forecast models already provide: air temperature, dew point (or relative humidity), wind speed, and solar radiation.
+
+The model solves two energy balance equations — one for the globe thermometer and one for the natural wet-bulb wick. Both require numerical iteration because temperature appears inside nonlinear terms.
+
+**Globe temperature (Tg):** At steady state, energy absorbed equals energy lost:
+
+```
+α · S_total + ε · σ · Ta⁴  =  ε · σ · Tg⁴ + hg · (Tg − Ta)
+```
+
+- `α` = absorptivity of the globe surface (≈ 0.95 for flat black paint)  
+- `S_total` = total incoming solar irradiance, W/m²  
+- `ε` = thermal emissivity (≈ 0.95)  
+- `σ` = Stefan-Boltzmann constant, 5.67 × 10⁻⁸ W/m²·K⁴  
+- `hg` = convective heat transfer coefficient — a function of wind speed and globe diameter, derived from the Nusselt-Reynolds-Prandtl relationship
+
+The left side is what the globe absorbs (solar radiation plus longwave radiation from the sky). The right side is what it sheds (thermal emission plus convective cooling by wind). Tg must be solved iteratively because it appears inside a fourth-power term.
+
+**Natural wet-bulb temperature (Tnwb):** The wet wick's energy balance adds evaporative cooling:
+
+```
+αw · S_total + ε · σ · Ta⁴  =  ε · σ · Tnwb⁴ + hw · (Tnwb − Ta) + (λ · hw / cp · Le^(2/3)) · (ew − ea) / P
+```
+
+- `αw` = absorptivity of the wet wick (≈ 0.4 — cotton reflects more than black paint)  
+- `hw` = convective coefficient for the cylindrical wick geometry  
+- `λ` = latent heat of vaporization of water  
+- `Le` = Lewis number (≈ 0.87 for air/water vapor)  
+- `ew` = saturation vapor pressure at Tnwb  
+- `ea` = actual vapor pressure of ambient air  
+- `P` = atmospheric pressure  
+
+The evaporative term `(ew − ea)` is what makes Tnwb sensitive to humidity. When the air is already saturated, `ew ≈ ea` and evaporation stalls — the wick can't cool itself, and Tnwb approaches Ta. When humidity is low, the gradient is large and Tnwb can be many degrees below Ta.
+
+The NWS runs this model at each grid point of their 2.5 km resolution forecast, driven by NAM model output. The results appear in the National Digital Forecast Database (NDFD) as the `wbgt` element — which is what the `sensor.wbgt_noaa` REST sensor in this integration pulls.
+
+### Software approximations and their tradeoffs
+
+Physical instruments measure Tnwb and Tg directly. Software has to estimate them. Several approximations exist, each with different accuracy/input tradeoffs.
+
+**Stull (2011) wet-bulb approximation** derives Tnwb from just air temperature and relative humidity, with no solar or wind input needed:
+
+```
+Tnwb = T · atan[0.151977 · (RH + 8.313659)^0.5]
+     + atan(T + RH)
+     − atan(RH − 1.676331)
+     + 0.00391838 · RH^1.5 · atan(0.023101 · RH)
+     − 4.686035
+```
+
+Where T is in °C, RH is relative humidity in %, and `atan` returns radians. It's accurate to within ±1°C for temperatures between 5–40°C and relative humidity above 5%. The catch: because it takes no solar radiation or wind input, it can only estimate the humidity side of WBGT. Radiant heat load doesn't exist in this equation.
+
+**What this integration does:** In `ha_sensors` mode without a globe temperature sensor, the integration computes Tnwb (via an equivalent approximation) and substitutes Ta for Tg — effectively the indoor formula `WBGT ≈ 0.7·Tnwb + 0.3·Ta`. This systematically undercounts heat stress by 3–8°C WBGT on sunny days, because the globe thermometer on a clear day runs well above air temperature. In `location` mode, Open-Meteo provides solar radiation data that allows a better Tg estimate before feeding the NWS formula.
+
+### Practical comparison of methods
+
+| Method | Inputs required | Typical accuracy | Use when |
+|---|---|---|---|
+| Physical WBGT meter (Kestrel 5400, QUESTemp, Extech HT30) | None — direct measurement | ±0.5°C | On-site compliance, OSHA documentation, legal exposure limits |
+| NWS NDFD forecast (`manual_wbgt` mode) | Lat/lon | ±1–3°C, 1–3 hr forecast lag | Planning, supervisor-level alerts, no local station |
+| Liljegren model with local station data | Ta, dew point, wind speed, solar radiation | ±1–2°C | `location` mode with quality data |
+| Stull approximation, globe substituted | Ta, RH only | ±3–8°C (undercounts in direct sun) | Indoor/shade work, `ha_sensors` fallback |
+| Heat index (NWS standard public metric) | Ta, RH only | Poor for workers in sun — ignores solar load entirely | Sedentary outdoor public health advisories |
+
+The practical bottom line: if your workers are in direct sun for extended periods, you need a measurement method that accounts for solar radiation. A $400 Kestrel 5400 Heat Stress Tracker is the most defensible option for a job site with potential OSHA exposure. For remote monitoring and supervisor alerts at scale, the `location` mode pulling NWS NDFD data is a reasonable operational choice — just know the reading lags real-time conditions by up to an hour on fast-changing days.
 
 ---
 

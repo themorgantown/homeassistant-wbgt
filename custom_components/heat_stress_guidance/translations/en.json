@@ -11,11 +11,12 @@
       },
       "weather": {
         "title": "Heat Stress Guidance — Weather Source",
-        "description": "Choose how WBGT (Wet Bulb Globe Temperature) is obtained.\n\n**location** — fetches an hourly forecast from Open-Meteo using latitude/longitude.\n**ha_sensors** — computes WBGT from existing temperature and humidity sensor entities in Home Assistant.\n**manual_wbgt** — reads a WBGT sensor entity directly (e.g. Davis Vantage, research station).",
+        "description": "Choose how WBGT (Wet Bulb Globe Temperature) is obtained.\n\n**location** — fetches an hourly forecast using fixed latitude/longitude.\n**tracked_entity** — fetches an hourly forecast using latitude/longitude from a person or mobile device tracker entity.\n**ha_sensors** — computes WBGT from existing temperature and humidity sensor entities in Home Assistant.\n**manual_wbgt** — reads a WBGT sensor entity directly (e.g. Davis Vantage, research station).",
         "data": {
           "weather_mode": "Weather source mode",
-          "latitude": "Latitude (location mode)",
-          "longitude": "Longitude (location mode)",
+          "latitude": "Latitude (fixed location mode)",
+          "longitude": "Longitude (fixed location mode)",
+          "location_entity": "Person or mobile device tracker entity (tracked_entity mode)",
           "temp_entity": "Temperature entity ID (ha_sensors mode)",
           "humidity_entity": "Humidity entity ID (ha_sensors mode)",
           "globe_temp_entity": "Globe temperature entity ID — optional (ha_sensors mode)",
@@ -39,6 +40,7 @@
     "error": {
       "cannot_connect": "Cannot reach the API. Verify the URL and that the server is running.",
       "missing_location": "Latitude and longitude are required for location mode.",
+      "missing_location_entity": "A person or device tracker entity is required for tracked_entity mode.",
       "missing_sensors": "Temperature and humidity entity IDs are required for ha_sensors mode.",
       "missing_wbgt_entity": "A WBGT entity ID is required for manual_wbgt mode.",
       "invalid_time": "Shift times must be in HH:MM format (e.g. 07:00).",
@@ -52,8 +54,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "Update Worker Profile",
+        "title": "Update Heat Stress Guidance",
         "data": {
+          "api_url": "API URL",
+          "weather_mode": "Weather source mode",
+          "latitude": "Latitude (fixed location mode)",
+          "longitude": "Longitude (fixed location mode)",
+          "location_entity": "Person or mobile device tracker entity (tracked_entity mode)",
+          "temp_entity": "Temperature entity ID (ha_sensors mode)",
+          "humidity_entity": "Humidity entity ID (ha_sensors mode)",
+          "globe_temp_entity": "Globe temperature entity ID — optional (ha_sensors mode)",
+          "wbgt_entity": "WBGT sensor entity ID (manual_wbgt mode)",
           "workload_mode": "Workload detection mode",
           "workload": "Work intensity (static mode / MQTT fallback)",
           "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
@@ -66,6 +77,11 @@
       }
     },
     "error": {
+      "cannot_connect": "Cannot reach the API. Verify the URL and that the server is running.",
+      "missing_location": "Latitude and longitude are required for location mode.",
+      "missing_location_entity": "A person or device tracker entity is required for tracked_entity mode.",
+      "missing_sensors": "Temperature and humidity entity IDs are required for ha_sensors mode.",
+      "missing_wbgt_entity": "A WBGT entity ID is required for manual_wbgt mode.",
       "invalid_time": "Shift times must be in HH:MM format (e.g. 07:00).",
       "mqtt_not_available": "MQTT integration is not configured. Add the MQTT integration in Home Assistant first.",
       "missing_mqtt_topic": "An MQTT topic is required when using MQTT workload detection."

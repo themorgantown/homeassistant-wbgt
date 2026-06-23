@@ -18,6 +18,7 @@ from .const import (
     CONF_GLOBE_TEMP_ENTITY,
     CONF_HUMIDITY_ENTITY,
     CONF_LATITUDE,
+    CONF_LOCATION_ENTITY,
     CONF_LONGITUDE,
     CONF_MQTT_TOPIC,
     CONF_SHIFT_END,
@@ -41,6 +42,7 @@ from .const import (
     WEATHER_MODE_HA_SENSORS,
     WEATHER_MODE_LOCATION,
     WEATHER_MODE_MANUAL_WBGT,
+    WEATHER_MODE_TRACKED_ENTITY,
     WORKLOAD_MODE_MQTT,
     WORKLOAD_MODE_STATIC,
     WORKLOAD_OPTIONS,
@@ -105,6 +107,12 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     self._data.update(user_input)
                     return await self.async_step_worker()
+            elif mode == WEATHER_MODE_TRACKED_ENTITY:
+                if not user_input.get(CONF_LOCATION_ENTITY, "").strip():
+                    errors["base"] = "missing_location_entity"
+                else:
+                    self._data.update(user_input)
+                    return await self.async_step_worker()
             elif mode == WEATHER_MODE_HA_SENSORS:
                 if not user_input.get(CONF_TEMP_ENTITY) or not user_input.get(CONF_HUMIDITY_ENTITY):
                     errors["base"] = "missing_sensors"
@@ -126,11 +134,13 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_WEATHER_MODE, default=WEATHER_MODE_LOCATION): vol.In([
                     WEATHER_MODE_LOCATION,
+                    WEATHER_MODE_TRACKED_ENTITY,
                     WEATHER_MODE_HA_SENSORS,
                     WEATHER_MODE_MANUAL_WBGT,
                 ]),
                 vol.Optional(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
+                vol.Optional(CONF_LOCATION_ENTITY, default=""): str,
                 vol.Optional(CONF_TEMP_ENTITY, default=""): str,
                 vol.Optional(CONF_HUMIDITY_ENTITY, default=""): str,
                 vol.Optional(CONF_GLOBE_TEMP_ENTITY, default=""): str,
@@ -188,6 +198,25 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         current = {**self._config_entry.data, **self._config_entry.options}
 
         if user_input is not None:
+            api_url = user_input[CONF_API_URL].rstrip("/")
+            ok = await _test_api_connection(api_url)
+            if not ok:
+                errors[CONF_API_URL] = "cannot_connect"
+
+            mode = user_input[CONF_WEATHER_MODE]
+            if mode == WEATHER_MODE_LOCATION:
+                if user_input.get(CONF_LATITUDE) is None or user_input.get(CONF_LONGITUDE) is None:
+                    errors["base"] = "missing_location"
+            elif mode == WEATHER_MODE_TRACKED_ENTITY:
+                if not user_input.get(CONF_LOCATION_ENTITY, "").strip():
+                    errors["base"] = "missing_location_entity"
+            elif mode == WEATHER_MODE_HA_SENSORS:
+                if not user_input.get(CONF_TEMP_ENTITY) or not user_input.get(CONF_HUMIDITY_ENTITY):
+                    errors["base"] = "missing_sensors"
+            elif mode == WEATHER_MODE_MANUAL_WBGT:
+                if not user_input.get(CONF_WBGT_ENTITY):
+                    errors["base"] = "missing_wbgt_entity"
+
             workload_mode = user_input.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
             if workload_mode == WORKLOAD_MODE_MQTT:
                 if not user_input.get(CONF_MQTT_TOPIC, "").strip():
@@ -201,11 +230,29 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
                 except vol.Invalid:
                     errors["base"] = "invalid_time"
             if not errors:
+                user_input[CONF_API_URL] = api_url
                 return self.async_create_entry(title="", data={**current, **user_input})
+
+        ha_lat = self.hass.config.latitude
+        ha_lon = self.hass.config.longitude
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
+                vol.Required(CONF_API_URL, default=current.get(CONF_API_URL, DEFAULT_API_URL)): str,
+                vol.Required(CONF_WEATHER_MODE, default=current.get(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)): vol.In([
+                    WEATHER_MODE_LOCATION,
+                    WEATHER_MODE_TRACKED_ENTITY,
+                    WEATHER_MODE_HA_SENSORS,
+                    WEATHER_MODE_MANUAL_WBGT,
+                ]),
+                vol.Optional(CONF_LATITUDE, default=current.get(CONF_LATITUDE, ha_lat)): vol.Coerce(float),
+                vol.Optional(CONF_LONGITUDE, default=current.get(CONF_LONGITUDE, ha_lon)): vol.Coerce(float),
+                vol.Optional(CONF_LOCATION_ENTITY, default=current.get(CONF_LOCATION_ENTITY, "")): str,
+                vol.Optional(CONF_TEMP_ENTITY, default=current.get(CONF_TEMP_ENTITY, "")): str,
+                vol.Optional(CONF_HUMIDITY_ENTITY, default=current.get(CONF_HUMIDITY_ENTITY, "")): str,
+                vol.Optional(CONF_GLOBE_TEMP_ENTITY, default=current.get(CONF_GLOBE_TEMP_ENTITY, "")): str,
+                vol.Optional(CONF_WBGT_ENTITY, default=current.get(CONF_WBGT_ENTITY, "")): str,
                 vol.Required(CONF_WORKLOAD_MODE, default=current.get(CONF_WORKLOAD_MODE, DEFAULT_WORKLOAD_MODE)): vol.In([WORKLOAD_MODE_STATIC, WORKLOAD_MODE_MQTT]),
                 vol.Required(CONF_WORKLOAD, default=current.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)): vol.In(WORKLOAD_OPTIONS),
                 vol.Optional(CONF_MQTT_TOPIC, default=current.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)): str,

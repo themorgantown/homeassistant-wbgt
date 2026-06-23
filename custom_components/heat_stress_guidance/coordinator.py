@@ -17,6 +17,7 @@ from .const import (
     CONF_GLOBE_TEMP_ENTITY,
     CONF_HUMIDITY_ENTITY,
     CONF_LATITUDE,
+    CONF_LOCATION_ENTITY,
     CONF_LONGITUDE,
     CONF_MOTION_THRESHOLD_HEAVY,
     CONF_MOTION_THRESHOLD_LIGHT,
@@ -45,6 +46,7 @@ from .const import (
     WEATHER_MODE_HA_SENSORS,
     WEATHER_MODE_LOCATION,
     WEATHER_MODE_MANUAL_WBGT,
+    WEATHER_MODE_TRACKED_ENTITY,
     WORKLOAD_MODE_MQTT,
     WORKLOAD_MODE_STATIC,
 )
@@ -52,6 +54,9 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 _FAHRENHEIT_UNITS = {"°F", "F", "degF", "fahrenheit"}
+
+# Cap exponential backoff so a failing API is retried at most once an hour.
+MAX_BACKOFF_INTERVAL = timedelta(hours=1)
 
 
 def _stull_wet_bulb(t_c: float, rh: float) -> float:
@@ -134,11 +139,34 @@ def _read_rh_state(hass, entity_id: str) -> float:
         raise UpdateFailed(f"Humidity entity '{entity_id}' has non-numeric state: {state.state}") from err
 
 
+def _read_location_state(hass, entity_id: str) -> tuple[float, float]:
+    """Read latitude/longitude from a person or device tracker entity."""
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unknown", "unavailable"):
+        raise UpdateFailed(f"Location entity '{entity_id}' is unavailable")
+
+    attrs = state.attributes
+    try:
+        lat = float(attrs["latitude"])
+        lon = float(attrs["longitude"])
+    except KeyError as err:
+        raise UpdateFailed(
+            f"Location entity '{entity_id}' does not expose latitude/longitude attributes"
+        ) from err
+    except (TypeError, ValueError) as err:
+        raise UpdateFailed(
+            f"Location entity '{entity_id}' has non-numeric latitude/longitude attributes"
+        ) from err
+
+    return lat, lon
+
+
 class HeatStressCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, config_entry) -> None:
         self._config_entry = config_entry
         self._current_workload: str = DEFAULT_WORKLOAD
         self._mqtt_unsubscribe = None
+        self._failure_count = 0
         interval_min = self._config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
         super().__init__(
             hass,
@@ -203,26 +231,45 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         return {**self._config_entry.data, **self._config_entry.options}
 
     async def _async_update_data(self) -> dict:
-        # Re-apply interval in case options flow changed it
-        interval_min = self._config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-        self.update_interval = timedelta(minutes=interval_min)
+        # Base interval from config (re-read so options-flow changes take effect)
+        base_interval = timedelta(
+            minutes=self._config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+        )
 
         try:
-            wbgt_c = await self._get_wbgt()
-        except UpdateFailed:
-            raise
-        except Exception as err:
-            raise UpdateFailed(f"Failed to acquire WBGT: {err}") from err
+            try:
+                wbgt_c = await self._get_wbgt()
+            except UpdateFailed:
+                raise
+            except Exception as err:
+                raise UpdateFailed(f"Failed to acquire WBGT: {err}") from err
 
-        if wbgt_c is None:
-            raise UpdateFailed("WBGT value unavailable")
+            if wbgt_c is None:
+                raise UpdateFailed("WBGT value unavailable")
 
-        try:
-            result = await self._call_compare_api(wbgt_c)
+            try:
+                result = await self._call_compare_api(wbgt_c)
+            except UpdateFailed:
+                raise
+            except Exception as err:
+                raise UpdateFailed(f"API call failed: {err}") from err
         except UpdateFailed:
+            # Exponential backoff: don't keep polling a failing endpoint at the
+            # configured rate. The interval doubles per consecutive failure and
+            # is capped, then resets to the configured value on the next success.
+            self._failure_count += 1
+            backoff = base_interval * 2 ** min(self._failure_count - 1, 10)
+            self.update_interval = min(backoff, MAX_BACKOFF_INTERVAL)
+            _LOGGER.debug(
+                "Update failed (%d consecutive); next poll in %s",
+                self._failure_count,
+                self.update_interval,
+            )
             raise
-        except Exception as err:
-            raise UpdateFailed(f"API call failed: {err}") from err
+
+        # Success — clear any backoff and return to the configured interval.
+        self._failure_count = 0
+        self.update_interval = base_interval
 
         composite = result.get("composite") or {}
         derived = result.get("derivedOutputs") or {}
@@ -260,17 +307,12 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         if mode == WEATHER_MODE_LOCATION:
             lat = self._config.get(CONF_LATITUDE)
             lon = self._config.get(CONF_LONGITUDE)
-            api_url = self._config.get(CONF_API_URL, DEFAULT_API_URL).rstrip("/")
-            url = f"{api_url}/api/v1/weather/wbgt"
-            session = async_get_clientsession(self.hass)
-            async with session.get(url, params={"lat": lat, "lon": lon}, timeout=10) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-            hourly = data.get("hourlyWbgt") or []
-            entry = _closest_hour_entry(hourly, dt_util.now())
-            if entry is None:
-                return None
-            return entry.get("valueC")
+            return await self._get_location_wbgt(lat, lon)
+
+        if mode == WEATHER_MODE_TRACKED_ENTITY:
+            location_entity = self._config.get(CONF_LOCATION_ENTITY)
+            lat, lon = _read_location_state(self.hass, location_entity)
+            return await self._get_location_wbgt(lat, lon)
 
         if mode == WEATHER_MODE_HA_SENSORS:
             temp_entity = self._config.get(CONF_TEMP_ENTITY)
@@ -293,6 +335,19 @@ class HeatStressCoordinator(DataUpdateCoordinator):
             return _read_temp_state(self.hass, wbgt_entity, "WBGT")
 
         raise UpdateFailed(f"Unknown weather mode: {mode}")
+
+    async def _get_location_wbgt(self, lat: float, lon: float) -> float | None:
+        api_url = self._config.get(CONF_API_URL, DEFAULT_API_URL).rstrip("/")
+        url = f"{api_url}/api/v1/weather/wbgt"
+        session = async_get_clientsession(self.hass)
+        async with session.get(url, params={"lat": lat, "lon": lon}, timeout=10) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+        hourly = data.get("hourlyWbgt") or []
+        entry = _closest_hour_entry(hourly, dt_util.now())
+        if entry is None:
+            return None
+        return entry.get("valueC")
 
     async def _call_compare_api(self, wbgt_c: float) -> dict:
         api_url = self._config.get(CONF_API_URL, DEFAULT_API_URL).rstrip("/")
