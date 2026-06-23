@@ -1,0 +1,61 @@
+title: Heat Stress Guidance
+views:
+  - title: Heat Stress
+    path: heat-stress
+    cards:
+      - type: vertical-stack
+        cards:
+          # WBGT gauge — green <28 / yellow <32 / red ≥32 (ACGIH heavy-work threshold)
+          - type: gauge
+            entity: sensor.heat_stress_wbgt
+            name: WBGT
+            unit: "°C"
+            min: 0
+            max: 50
+            needle: true
+            severity:
+              green: 0
+              yellow: 28
+              red: 32
+
+          # Stop-work alert banner (only visible when binary_sensor is on)
+          - type: conditional
+            conditions:
+              - entity: binary_sensor.heat_stress_stop_work
+                state: "on"
+            card:
+              type: markdown
+              content: >
+                ## ⛔ STOP WORK — Heat Emergency
+                At least one applicable heat stress standard requires work to stop.
+                Move workers to a cool area immediately.
+              card_mod:
+                style: |
+                  ha-card {
+                    background: #b71c1c;
+                    color: white;
+                    font-weight: bold;
+                  }
+
+          # Key guidance entities
+          - type: entities
+            title: Current Guidance
+            entities:
+              - entity: sensor.heat_stress_risk_level
+                name: Risk Level
+                icon: mdi:alert-circle
+              - entity: sensor.heat_stress_work_minutes
+                name: Work (min/hr)
+                icon: mdi:briefcase-clock
+              - entity: sensor.heat_stress_rest_minutes
+                name: Rest (min/hr)
+                icon: mdi:sleep
+              - entity: sensor.heat_stress_hydration
+                name: Hydration (mL/hr)
+                icon: mdi:water
+              - entity: sensor.heat_stress_break_ml
+                name: Drink per Break (mL)
+                icon: mdi:cup-water
+              - entity: binary_sensor.heat_stress_stop_work
+                name: Stop Work Alert
+                icon: mdi:hand-back-right-off

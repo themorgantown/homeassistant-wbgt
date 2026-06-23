@@ -1,0 +1,20 @@
+name: API contract
+
+# Daily check that the live Heat Guidance Calculator API still returns every
+# field the integration reads. Catches upstream API drift within a day.
+on:
+  schedule:
+    - cron: "17 13 * * *"  # daily ~13:17 UTC
+  workflow_dispatch:
+
+jobs:
+  live:
+    name: Live API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements_test.txt
+      - run: pytest tests/test_api_contract.py -v

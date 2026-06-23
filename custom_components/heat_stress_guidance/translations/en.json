@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Heat Stress Guidance — API",
+        "description": "Configure the API endpoint. Use the default for the hosted service or enter your local server address (e.g. http://homeassistant.local:3299).",
+        "data": {
+          "api_url": "API URL",
+          "update_interval_minutes": "Update interval (minutes)"
+        }
+      },
+      "weather": {
+        "title": "Heat Stress Guidance — Weather Source",
+        "description": "Choose how WBGT (Wet Bulb Globe Temperature) is obtained.\n\n**location** — fetches an hourly forecast from Open-Meteo using latitude/longitude.\n**ha_sensors** — computes WBGT from existing temperature and humidity sensor entities in Home Assistant.\n**manual_wbgt** — reads a WBGT sensor entity directly (e.g. Davis Vantage, research station).",
+        "data": {
+          "weather_mode": "Weather source mode",
+          "latitude": "Latitude (location mode)",
+          "longitude": "Longitude (location mode)",
+          "temp_entity": "Temperature entity ID (ha_sensors mode)",
+          "humidity_entity": "Humidity entity ID (ha_sensors mode)",
+          "globe_temp_entity": "Globe temperature entity ID — optional (ha_sensors mode)",
+          "wbgt_entity": "WBGT sensor entity ID (manual_wbgt mode)"
+        }
+      },
+      "worker": {
+        "title": "Heat Stress Guidance — Worker Profile",
+        "description": "These settings determine which heat stress thresholds apply and how the composite work/rest schedule is calculated.\n\n**static** — use a fixed work intensity setting.\n**mqtt** — derive intensity automatically from an open-sensor accelerometer stream over MQTT.",
+        "data": {
+          "workload_mode": "Workload detection mode",
+          "workload": "Work intensity (static mode / MQTT fallback)",
+          "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
+          "acclimatization": "Acclimatization status",
+          "shift_start": "Shift start (HH:MM)",
+          "shift_end": "Shift end (HH:MM)",
+          "clothing": "Clothing / PPE type"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the API. Verify the URL and that the server is running.",
+      "missing_location": "Latitude and longitude are required for location mode.",
+      "missing_sensors": "Temperature and humidity entity IDs are required for ha_sensors mode.",
+      "missing_wbgt_entity": "A WBGT entity ID is required for manual_wbgt mode.",
+      "invalid_time": "Shift times must be in HH:MM format (e.g. 07:00).",
+      "mqtt_not_available": "MQTT integration is not configured. Add the MQTT integration in Home Assistant first.",
+      "missing_mqtt_topic": "An MQTT topic is required when using MQTT workload detection."
+    },
+    "abort": {
+      "already_configured": "This integration is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Worker Profile",
+        "data": {
+          "workload_mode": "Workload detection mode",
+          "workload": "Work intensity (static mode / MQTT fallback)",
+          "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
+          "acclimatization": "Acclimatization status",
+          "shift_start": "Shift start (HH:MM)",
+          "shift_end": "Shift end (HH:MM)",
+          "clothing": "Clothing / PPE type",
+          "update_interval_minutes": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "invalid_time": "Shift times must be in HH:MM format (e.g. 07:00).",
+      "mqtt_not_available": "MQTT integration is not configured. Add the MQTT integration in Home Assistant first.",
+      "missing_mqtt_topic": "An MQTT topic is required when using MQTT workload detection."
+    }
+  }
+}
