@@ -1,0 +1,88 @@
+"""Build the OwnTracks scan-to-link QR payload.
+
+The QR encodes a complete ``owntracks://config?inline=<base64-json>`` URL. When
+scanned by the OwnTracks iOS app it is handed straight to that app's existing
+config-import pipeline (``processURIConfig:`` -> ``configFromDictionary:``), which
+switches the app to HTTP mode pointing at this Home Assistant instance.
+
+Transport is the OwnTracks core integration's HTTP webhook, exposed over Nabu Casa
+as a cloudhook when a subscription is active. The cloudhook URL is itself the
+secret, so no MQTT broker, password, or long-lived token is involved.
+"""
+from __future__ import annotations
+
+import base64
+import json
+
+from homeassistant.components import cloud, webhook
+from homeassistant.core import HomeAssistant
+
+OWNTRACKS_DOMAIN = "owntracks"
+
+# OwnTracks config-dictionary connection mode for HTTP (mode 0 = MQTT, 3 = HTTP).
+OWNTRACKS_MODE_HTTP = 3
+
+DEFAULT_USER = "daniel"
+DEFAULT_DEVICE_ID = "iphone"
+DEFAULT_TRACKER_ID = "da"
+
+
+class OwnTracksNotConfigured(Exception):
+    """The OwnTracks core integration is not set up, so there is no webhook."""
+
+
+class CloudhookUnavailable(Exception):
+    """A reachable webhook URL could not be resolved."""
+
+
+async def _resolve_webhook_url(hass: HomeAssistant, webhook_id: str) -> str:
+    """Return the cloudhook URL when cloud is active, else the local webhook URL."""
+    if cloud.async_active_subscription(hass):
+        try:
+            return await cloud.async_get_or_create_cloudhook(hass, webhook_id)
+        except cloud.CloudNotAvailable:
+            # Subscription reported active but cloud not ready; fall back below.
+            pass
+    try:
+        return webhook.async_generate_url(hass, webhook_id)
+    except Exception as err:  # network helper raises when no URL is configured
+        raise CloudhookUnavailable(str(err)) from err
+
+
+async def async_build_owntracks_qr_payload(
+    hass: HomeAssistant,
+    *,
+    user: str = DEFAULT_USER,
+    device_id: str = DEFAULT_DEVICE_ID,
+    tracker_id: str = DEFAULT_TRACKER_ID,
+) -> str:
+    """Build the ``owntracks://config?inline=...`` URL to encode in the QR code."""
+    entries = hass.config_entries.async_entries(OWNTRACKS_DOMAIN)
+    if not entries:
+        raise OwnTracksNotConfigured
+
+    entry = entries[0]
+    webhook_id = entry.data.get("webhook_id")
+    if not webhook_id:
+        raise OwnTracksNotConfigured
+
+    url = await _resolve_webhook_url(hass, webhook_id)
+
+    config: dict = {
+        "_type": "configuration",
+        "mode": OWNTRACKS_MODE_HTTP,
+        "url": url,
+        "user": user,
+        "deviceid": device_id,
+        "trackerid": tracker_id,
+    }
+    # OwnTracks core stores an encryption secret; including it makes the device
+    # encrypt payloads end-to-end (libsodium) and lets HA decrypt them.
+    secret = entry.data.get("secret")
+    if secret:
+        config["secret"] = secret
+
+    inline = base64.b64encode(
+        json.dumps(config, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    return f"owntracks://config?inline={inline}"

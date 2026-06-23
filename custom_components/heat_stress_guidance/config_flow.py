@@ -7,7 +7,16 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
+from .qr import (
+    CloudhookUnavailable,
+    DEFAULT_DEVICE_ID,
+    DEFAULT_TRACKER_ID,
+    DEFAULT_USER,
+    OwnTracksNotConfigured,
+    async_build_owntracks_qr_payload,
+)
 from .const import (
     ACCLIMATIZATION_OPTIONS,
     CLOTHING_LABELS,
@@ -205,6 +214,49 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None) -> FlowResult:
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["configure", "show_qr"],
+        )
+
+    async def async_step_show_qr(self, user_input=None) -> FlowResult:
+        user = DEFAULT_USER
+        device_id = DEFAULT_DEVICE_ID
+        tracker_id = DEFAULT_TRACKER_ID
+        if user_input is not None:
+            user = (user_input.get("user") or "").strip() or DEFAULT_USER
+            device_id = (user_input.get("deviceid") or "").strip() or DEFAULT_DEVICE_ID
+            tracker_id = (user_input.get("trackerid") or "").strip() or DEFAULT_TRACKER_ID
+
+        try:
+            payload = await async_build_owntracks_qr_payload(
+                self.hass, user=user, device_id=device_id, tracker_id=tracker_id
+            )
+        except OwnTracksNotConfigured:
+            return self.async_abort(reason="owntracks_not_configured")
+        except CloudhookUnavailable:
+            return self.async_abort(reason="cloud_unavailable")
+
+        # Editing an identity field and resubmitting regenerates the QR; there is
+        # nothing to persist, so the step just re-renders. The user closes the
+        # dialog when done.
+        return self.async_show_form(
+            step_id="show_qr",
+            data_schema=vol.Schema({
+                vol.Optional("user", default=user): str,
+                vol.Optional("deviceid", default=device_id): str,
+                vol.Optional("trackerid", default=tracker_id): str,
+                vol.Optional("qr"): selector.QrCodeSelector(
+                    config=selector.QrCodeSelectorConfig(
+                        data=payload,
+                        scale=6,
+                        error_correction_level=selector.QrErrorCorrectionLevel.QUARTILE,
+                    )
+                ),
+            }),
+        )
+
+    async def async_step_configure(self, user_input=None) -> FlowResult:
         errors = {}
         current = {**self._config_entry.data, **self._config_entry.options}
 
@@ -248,7 +300,7 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         ha_lon = self.hass.config.longitude
 
         return self.async_show_form(
-            step_id="init",
+            step_id="configure",
             data_schema=vol.Schema({
                 vol.Required(CONF_API_URL, default=current.get(CONF_API_URL, DEFAULT_API_URL)): str,
                 vol.Required(CONF_WEATHER_MODE, default=current.get(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)): vol.In([

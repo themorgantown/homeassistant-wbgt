@@ -54,8 +54,28 @@
     }
   },
   "options": {
+    "abort": {
+      "owntracks_not_configured": "The OwnTracks integration is not set up. Add the OwnTracks integration in Home Assistant first, then reopen this QR code.",
+      "cloud_unavailable": "Could not determine a reachable webhook URL. Enable Home Assistant Cloud (Nabu Casa) or set an external URL, then try again."
+    },
     "step": {
       "init": {
+        "title": "Heat Stress Guidance",
+        "menu_options": {
+          "configure": "Edit settings",
+          "show_qr": "Show connection QR code"
+        }
+      },
+      "show_qr": {
+        "title": "OwnTracks connection QR code",
+        "description": "Scan this in the OwnTracks app: open OwnTracks → Settings → Scan QR code. It configures OwnTracks to send location to this Home Assistant instance over the OwnTracks webhook — no typing required. Edit the identity fields and resubmit to regenerate the code.",
+        "data": {
+          "user": "Username",
+          "deviceid": "Device ID",
+          "trackerid": "Tracker ID (2 chars shown on the map)"
+        }
+      },
+      "configure": {
         "title": "Update Heat Stress Guidance",
         "data": {
           "api_url": "API URL",
