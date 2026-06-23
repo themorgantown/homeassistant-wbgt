@@ -1,7 +1,11 @@
 # Heat Stress Guidance — Home Assistant Integration
 
-Reads local weather conditions, calls the [Heat Guidance Calculator API](https://heat-guidance-calculator.pages.dev), and exposes work/rest ratios, hydration guidance, and stop-work alerts as Home Assistant sensor entities. Guidance is drawn from 76 international occupational heat standards (NIOSH, ACGIH, ISO 7243, OSHA, and country-specific rules) and always uses the most protective applicable limit.
+This tool is designed for workers, supervisors, and safety officers to monitor heat stress conditions in real time. It can be useful if you're working outdoors, in hot warehouses, or in any environment where heat stress is a concern. Not only does it provide real-time guidance, but it also helps you comply with occupational safety standards for your region. There are as of June 2026 over 76 international occupational heat stress standards included in the guidance, including NIOSH, ACGIH, ISO 7243, OSHA, and country-specific rules.
 
+This tool reads local weather conditions, calls the [Heat Guidance Calculator API](https://heat-guidance-calculator.pages.dev), and exposes work/rest ratios, hydration guidance, and stop-work alerts as Home Assistant sensor entities.  
+
+ 
+![alt text](sky.jpg)
 ---
 
 ## Quickstart — up and running in 5 minutes
@@ -319,6 +323,23 @@ The NDFD endpoint returns XML (DWML format). If `value_json` fails to parse it, 
 
 **Shift times rejected during setup**
 Times must be entered in 24-hour `HH:MM` format with a leading zero (e.g., `07:00`, `15:30`). Values like `7:00` or `3:30 PM` will return a form error.
+
+---
+
+## Development — API contract test
+
+This integration is a thin client over the [Heat Guidance Calculator API](https://heat-guidance-calculator.pages.dev). It reads response fields defensively (with `.get()`), so if the API ever renames or drops a field, a sensor would quietly go blank instead of raising an error. To catch that, `tests/test_api_contract.py` calls the **live** API with the same payloads the integration sends and asserts every field it depends on is reachable and returns sane values — across both a normal work/rest schedule and a stop-work scenario, plus the weather and health endpoints.
+
+The [`API contract`](.github/workflows/api-contract.yml) GitHub Action runs this test **once a day** (and on demand via the Actions tab), so upstream API drift is surfaced within a day rather than by a user noticing a missing reading.
+
+Run it locally:
+
+```bash
+pip install -r requirements_test.txt
+pytest tests/test_api_contract.py -v
+```
+
+Point it at a different API instance with `HGC_API_BASE` (e.g. `HGC_API_BASE=http://localhost:8788 pytest tests/test_api_contract.py`). When you change which response fields the integration reads in `custom_components/heat_stress_guidance/coordinator.py`, update the field lists at the top of the test to match.
 
 ---
 
