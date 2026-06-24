@@ -2,39 +2,37 @@
   "config": {
     "step": {
       "user": {
-        "title": "Heat Stress Guidance — API",
-        "description": "Configure the API endpoint. Use the default for the hosted service or enter your local server address.",
+        "title": "Heat Alerts",
+        "description": "Get notified when it's dangerously hot. This tool checks the WBGT at your location — a heat measure that, unlike a weather app, accounts for humidity and direct sun — and alerts your phone when conditions get risky. Just confirm your location and pick a device for alerts. Open Advanced only if you want to fine-tune the data source, work limits, or region — sensible defaults are used otherwise.",
         "data": {
-          "api_url": "API URL",
-          "update_interval_minutes": "Update interval (minutes)"
-        }
-      },
-      "weather": {
-        "title": "Heat Stress Guidance — Weather Source",
-        "description": "Choose how WBGT is obtained. 'location' fetches a forecast from fixed coordinates; 'tracked_entity' fetches a forecast from a person or mobile device tracker; 'ha_sensors' computes WBGT from existing entities; 'manual_wbgt' reads a WBGT entity directly.",
-        "data": {
-          "weather_mode": "Weather source mode",
-          "latitude": "Latitude (fixed location mode)",
-          "longitude": "Longitude (fixed location mode)",
-          "location_entity": "Person or mobile device tracker entity (tracked_entity mode)",
-          "temp_entity": "Temperature entity ID (ha_sensors mode)",
-          "humidity_entity": "Humidity entity ID (ha_sensors mode)",
-          "globe_temp_entity": "Globe temperature entity ID (ha_sensors mode, optional)",
-          "wbgt_entity": "WBGT sensor entity ID (manual_wbgt mode)"
-        }
-      },
-      "worker": {
-        "title": "Heat Stress Guidance — Worker Profile",
-        "data": {
-          "workload_mode": "Workload detection mode",
-          "workload": "Work intensity (static mode fallback)",
-          "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
-          "acclimatization": "Acclimatization status",
-          "shift_start": "Shift start (HH:MM)",
-          "shift_end": "Shift end (HH:MM)",
-          "clothing": "Clothing / PPE type",
-          "country": "Country (ISO code; blank = global standards only)",
-          "state": "US state (blank = federal + global only)"
+          "latitude": "Your latitude (for the heat forecast)",
+          "longitude": "Your longitude (for the heat forecast)",
+          "alert_device": "Alert device (phone/tablet to notify)"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Optional — defaults work for most people. Change the weather/data source, work-intensity and shift details, or which regional safety standards apply.",
+            "data": {
+              "weather_mode": "Weather source",
+              "location_entity": "Person or phone to follow (tracked source)",
+              "temp_entity": "Temperature sensor (HA sensors source)",
+              "humidity_entity": "Humidity sensor (HA sensors source)",
+              "globe_temp_entity": "Globe temperature sensor (optional)",
+              "wbgt_entity": "WBGT sensor (manual source)",
+              "workload_mode": "Work intensity — detection mode",
+              "workload": "Work intensity",
+              "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
+              "acclimatization": "Acclimatization to heat",
+              "shift_start": "Shift start (HH:MM)",
+              "shift_end": "Shift end (HH:MM)",
+              "clothing": "Clothing / PPE",
+              "country": "Country (scopes which safety standards apply)",
+              "state": "US state (blank = federal + global only)",
+              "api_url": "API URL",
+              "update_interval_minutes": "Update interval (minutes)"
+            }
+          }
         }
       }
     },
@@ -72,27 +70,36 @@
         }
       },
       "configure": {
-        "title": "Update Heat Stress Guidance",
+        "title": "Update settings",
         "data": {
-          "api_url": "API URL",
-          "weather_mode": "Weather source mode",
-          "latitude": "Latitude (fixed location mode)",
-          "longitude": "Longitude (fixed location mode)",
-          "location_entity": "Person or mobile device tracker entity (tracked_entity mode)",
-          "temp_entity": "Temperature entity ID (ha_sensors mode)",
-          "humidity_entity": "Humidity entity ID (ha_sensors mode)",
-          "globe_temp_entity": "Globe temperature entity ID (ha_sensors mode, optional)",
-          "wbgt_entity": "WBGT sensor entity ID (manual_wbgt mode)",
-          "workload_mode": "Workload detection mode",
-          "workload": "Work intensity (static mode fallback)",
-          "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
-          "acclimatization": "Acclimatization status",
-          "shift_start": "Shift start (HH:MM)",
-          "shift_end": "Shift end (HH:MM)",
-          "clothing": "Clothing / PPE type",
-          "country": "Country (ISO code; blank = global standards only)",
-          "state": "US state (blank = federal + global only)",
-          "update_interval_minutes": "Update interval (minutes)"
+          "latitude": "Your latitude (for the heat forecast)",
+          "longitude": "Your longitude (for the heat forecast)",
+          "alert_device": "Alert device (phone/tablet to notify)"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Optional — defaults work for most people. Change the weather/data source, work-intensity and shift details, or which regional safety standards apply.",
+            "data": {
+              "weather_mode": "Weather source",
+              "location_entity": "Person or phone to follow (tracked source)",
+              "temp_entity": "Temperature sensor (HA sensors source)",
+              "humidity_entity": "Humidity sensor (HA sensors source)",
+              "globe_temp_entity": "Globe temperature sensor (optional)",
+              "wbgt_entity": "WBGT sensor (manual source)",
+              "workload_mode": "Work intensity — detection mode",
+              "workload": "Work intensity",
+              "mqtt_topic": "MQTT topic (open-sensor accelerometer)",
+              "acclimatization": "Acclimatization to heat",
+              "shift_start": "Shift start (HH:MM)",
+              "shift_end": "Shift end (HH:MM)",
+              "clothing": "Clothing / PPE",
+              "country": "Country (scopes which safety standards apply)",
+              "state": "US state (blank = federal + global only)",
+              "api_url": "API URL",
+              "update_interval_minutes": "Update interval (minutes)"
+            }
+          }
         }
       }
     },

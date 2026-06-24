@@ -153,6 +153,12 @@ def test_weather_endpoint_returns_hourly_wbgt():
         timeout=TIMEOUT,
     )
     assert resp.status_code == 200, resp.text
-    value = _get(resp.json(), "hourlyWbgt[].valueC")
+    body = resp.json()
+    value = _get(body, "hourlyWbgt[].valueC")
     assert value not in (_MISSING, None), "hourlyWbgt[].valueC unreachable"
     assert isinstance(value, (int, float))
+
+    # The forecast-peak sensors anchor each hour to a real instant, so they read
+    # the per-entry date/time and the top-level timezone. Guard those too.
+    for path in ("hourlyWbgt[].date", "hourlyWbgt[].time", "timezone"):
+        assert _get(body, path) not in (_MISSING, None), f"{path} unreachable"

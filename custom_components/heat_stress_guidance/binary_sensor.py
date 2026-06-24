@@ -31,6 +31,12 @@ class StopWorkBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._entry = entry
 
     @property
+    def available(self) -> bool:
+        # A SAFETY sensor must not read "clear" when there is simply no guidance:
+        # go unavailable when no standard covers the configured jurisdiction.
+        return super().available and bool((self.coordinator.data or {}).get("available", True))
+
+    @property
     def is_on(self) -> bool:
         return bool((self.coordinator.data or {}).get("stop_work", False))
 

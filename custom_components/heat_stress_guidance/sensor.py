@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -26,6 +30,9 @@ async def async_setup_entry(
         HydrationOzPerHrSensor(coordinator, entry),
         BreakMlSensor(coordinator, entry),
         ActiveWorkloadSensor(coordinator, entry),
+        ForecastPeakWbgtSensor(coordinator, entry),
+        ForecastPeakTimeSensor(coordinator, entry),
+        ForecastPeakRiskLevelSensor(coordinator, entry),
     ])
 
 
@@ -50,6 +57,12 @@ class _HeatStressSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._entry = entry
+
+    @property
+    def available(self) -> bool:
+        # Unavailable when no standard covers the configured jurisdiction, so a
+        # value never reads as authoritative guidance when there is none.
+        return super().available and bool((self.coordinator.data or {}).get("available", True))
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -181,3 +194,72 @@ class ActiveWorkloadSensor(_HeatStressSensor):
         base = _common_attrs(data)
         base["workload_mode"] = data.get("workload_mode", WORKLOAD_MODE_STATIC)
         return base
+
+
+# --- Forecast lookahead -----------------------------------------------------
+# Populated only in location / tracked_entity weather modes (the modes that
+# fetch an hourly forecast); empty otherwise. "Peak" = the highest-WBGT hour in
+# the next 24 hours, with the risk that WBGT implies for the current worker
+# profile. These intentionally do not carry the current-condition attributes.
+
+
+class ForecastPeakWbgtSensor(_HeatStressSensor):
+    """Highest forecast WBGT in the next 24 hours."""
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "forecast_peak_wbgt_c", "Forecast Peak WBGT")
+        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+        self._attr_icon = "mdi:thermometer-chevron-up"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("forecast_peak_wbgt_c")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+        return {
+            "peak_time": data.get("forecast_peak_time"),
+            "risk_level_at_peak": data.get("forecast_peak_risk_level"),
+            "stop_work_at_peak": data.get("forecast_peak_stop_work"),
+            "forecast_window_hours": 24,
+        }
+
+
+class ForecastPeakTimeSensor(_HeatStressSensor):
+    """When the next-24-hour WBGT peak occurs."""
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "forecast_peak_time", "Forecast Peak Time")
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:clock-alert-outline"
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("forecast_peak_time")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"peak_wbgt_c": (self.coordinator.data or {}).get("forecast_peak_wbgt_c")}
+
+
+class ForecastPeakRiskLevelSensor(_HeatStressSensor):
+    """Risk level the forecast peak WBGT would produce for this worker profile."""
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "forecast_peak_risk_level", "Forecast Peak Risk Level")
+        self._attr_icon = "mdi:alert-circle-outline"
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("forecast_peak_risk_level")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+        return {
+            "stop_work_at_peak": data.get("forecast_peak_stop_work"),
+            "peak_wbgt_c": data.get("forecast_peak_wbgt_c"),
+            "peak_time": data.get("forecast_peak_time"),
+        }

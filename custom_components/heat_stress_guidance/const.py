@@ -93,6 +93,11 @@ CONF_MOTION_THRESHOLD_HEAVY = "motion_threshold_heavy"
 
 CONF_API_URL = "api_url"
 CONF_UPDATE_INTERVAL = "update_interval_minutes"
+# Optional mobile_app device that receives rich push alerts on a restriction event.
+CONF_ALERT_DEVICE = "alert_device"
+# Risk tiers that count as a "heat restriction" worth a push alert (stop-work is
+# always included regardless of tier).
+ALERT_RISK_LEVELS = {"high", "extreme", "critical"}
 CONF_WEATHER_MODE = "weather_mode"
 CONF_LATITUDE = "latitude"
 CONF_LONGITUDE = "longitude"

@@ -24,13 +24,9 @@ Click the button above → add the repository as an **Integration** → **Downlo
 
 Or: **Settings → Integrations → Add Integration → Heat Stress Guidance**
 
-**3. Step 1 — API**: leave the API URL as the default and click Next.
+**3. Confirm and submit**: your latitude/longitude are pre-filled from Home Assistant. Optionally pick a phone/tablet under **Alert device** to receive push alerts. Click Submit — everything else uses sensible defaults.
 
-**4. Step 2 — Weather source**: choose **`location`** to use fixed coordinates, or **`tracked_entity`** to use a Home Assistant `person.*` or mobile app `device_tracker.*` entity.
-
-**5. Step 3 — Worker profile**: pick the work intensity that best describes the job, set shift start/end times, and click Submit.
-
-Eight entities will appear under the integration. That's it.
+That's it. The integration's entities appear immediately. Want to change the data source, work intensity, shift times, or region? Expand **Advanced** during setup, or adjust it any time under **Configure**.
 
 ---
 
@@ -46,6 +42,11 @@ Eight entities will appear under the integration. That's it.
 | `sensor.heat_stress_hydration_ounces` | Same hydration target converted to US fluid ounces per hour (1 fl oz = 29.6 mL). Easier for workers who think in ounces rather than milliliters. |
 | `sensor.heat_stress_break_ml` | How much to drink at each rest break — `hydration ÷ (60 ÷ work_minutes)`. |
 | `binary_sensor.heat_stress_stop_work` | **On** when one or more applicable standards require all work to stop. Trigger alerts and automations off this. |
+| `sensor.heat_stress_forecast_peak_wbgt` | Highest forecast WBGT in the **next 24 hours** (°C). Attributes carry `peak_time`, `risk_level_at_peak`, and `stop_work_at_peak`. Only populated in `location` / `tracked_entity` modes. |
+| `sensor.heat_stress_forecast_peak_time` | Timestamp of that next-24-hour WBGT peak — use it to schedule shift adjustments before conditions worsen. |
+| `sensor.heat_stress_forecast_peak_risk_level` | Risk tier the peak WBGT would produce for *this* worker profile (`safe`…`critical`). The `stop_work_at_peak` attribute flags a forecast stop-work. |
+
+The three `forecast_peak_*` entities give a 24-hour lookahead so a supervisor can plan around the hottest part of the day. They are computed from the hourly forecast (`location` / `tracked_entity` modes only) and stay empty in `ha_sensors` / `manual_wbgt` modes, which have no forecast. The peak's risk level is evaluated against the same standards and worker profile as the live guidance.
 
 All entities carry extra state attributes: `contributing_standards` (which standards drove the result), `triggered_by` (the single binding standard), `jurisdiction_scope` (the country/state the guidance is scoped to), `acclimatization`, `clothing`, and `effective_wbgt_c` (WBGT after clothing adjustment factor).
 
@@ -86,18 +87,29 @@ The repository is public, but it is a custom HACS repository. A default-catalog 
 
 ## Configuration
 
-Setup is a 3-step wizard. All settings can be changed later via **Settings → Integrations → Heat Stress Guidance → Configure**.
+Setup is a **single screen**. The only things shown up front are your **location** (pre-filled from Home Assistant) and an optional **Alert device** — because the headline job of this integration is simply *"tell me when it's dangerously hot."* Everything else lives under a collapsed **Advanced** section with sensible defaults, so a first-time user can just click Submit.
 
-### Step 1 — API
+All settings can be changed later via **Settings → Integrations → Heat Stress Guidance → Configure** (same layout: essentials up front, the rest under Advanced).
+
+### Essentials (always shown)
+
+| Field | Default | Notes |
+|---|---|---|
+| Latitude / Longitude | Your Home Assistant location | Used to fetch the heat forecast. Override for a specific job site. |
+| Alert device | *(none)* | Optional. A phone/tablet running the Home Assistant app that receives a rich push when a heat restriction begins. See [Heat alert notifications](#heat-alert-notifications). |
+
+Everything below is under **Advanced** — open it only if you want to change it.
+
+### Advanced — API
 
 | Field | Default | Notes |
 |---|---|---|
 | API URL | `https://heat-guidance-calculator.pages.dev` | Leave as default unless you're running a local server |
 | Update interval | `15` minutes | How often to poll. 15 min is appropriate for field use; reduce to 5 min for real-time monitoring. |
 
-### Step 2 — Weather source
+### Advanced — Weather source
 
-Four modes — choose the one that matches your setup:
+Four modes — choose the one that matches your setup (defaults to `location` using your Home Assistant coordinates):
 
 | Mode | Best when | What you'll enter |
 |---|---|---|
@@ -194,7 +206,7 @@ After restart, the entity `sensor.wbgt_noaa` will appear. In the integration set
 
 ---
 
-### Step 3 — Worker profile
+### Advanced — Worker profile
 
 | Field | Options | Notes |
 |---|---|---|
@@ -207,6 +219,20 @@ After restart, the entity `sensor.wbgt_noaa` will appear. In the integration set
 | Clothing / PPE | Standard work / SMS coveralls / Polyolefin / Double-layer / Vapor-barrier suit | Heavier PPE traps heat — this applies a clothing adjustment factor to WBGT |
 | **Country** | ISO country code (e.g. `US`), or blank | **Scopes which standards apply.** Defaults to your Home Assistant country. Blank = global standards only. |
 | **US state** | e.g. `NY`, or blank | Only used when Country is `US`. A state with its own rule (CA, CO, MD, MN, NV, OR, WA) adds it; any other state — including NY — uses US federal + global standards. |
+
+(The **Alert device** is an essential field shown above the Advanced section — see [Essentials](#essentials-always-shown).)
+
+### Heat alert notifications
+
+If you pick an **Alert device**, the integration pushes a rich notification straight to that phone/tablet the moment a heat restriction begins — no automation to write. A restriction is a rising edge into **stop-work** or **high / extreme / critical** risk.
+
+The notification:
+- shows the current WBGT and either the work/rest/hydration targets or a **STOP WORK** instruction, with the binding standard;
+- is **time-sensitive** on iOS and posts to a high-importance "Heat alerts" channel with an amber/red accent on Android;
+- carries an **Open dashboard** action;
+- uses a stable `tag`, so it **updates in place** as conditions escalate and **auto-clears** when they return to normal.
+
+The device list is populated from devices that have the Home Assistant Companion app installed (the `mobile_app` integration). For more elaborate routing (multiple recipients, escalation, TTS), use the automation examples below instead.
 
 ### Why country/state matters
 
@@ -335,6 +361,34 @@ automation:
           {{ states('sensor.heat_stress_rest_minutes') }} rest min per hour.
           Fluid target: {{ states('sensor.heat_stress_hydration') }} mL/hr.
           Standards: {{ state_attr('sensor.heat_stress_risk_level', 'contributing_standards') | join(', ') }}
+```
+
+### Plan-ahead alert when the forecast peak will be severe
+
+Warns a supervisor *in advance* when the next-24-hour forecast peak will reach high risk or require stop-work — time to adjust the shift before it gets dangerous. (Requires `location` or `tracked_entity` weather mode.)
+
+```yaml
+automation:
+  alias: "Heat forecast — plan-ahead alert"
+  trigger:
+    - platform: state
+      entity_id: sensor.heat_stress_forecast_peak_risk_level
+      to:
+        - high
+        - extreme
+        - critical
+  action:
+    - action: notify.mobile_app_supervisor_phone
+      data:
+        title: "Heat forecast — {{ states('sensor.heat_stress_forecast_peak_risk_level') }} ahead"
+        message: >
+          Forecast peak {{ states('sensor.heat_stress_forecast_peak_wbgt') }}°C WBGT at
+          {{ as_timestamp(states('sensor.heat_stress_forecast_peak_time')) | timestamp_custom('%a %H:%M') }}.
+          {% if is_state_attr('sensor.heat_stress_forecast_peak_risk_level', 'stop_work_at_peak', true) %}
+          Work will need to STOP at the peak — adjust the schedule now.
+          {% else %}
+          Plan rest cycles and hydration around the peak.
+          {% endif %}
 ```
 
 ---

@@ -1,0 +1,22 @@
+name: Unit tests
+
+# Fast, offline unit tests for the integration's pure logic (jurisdiction
+# scoping, forecast peak, entity availability, WBGT math). No network — the live
+# API contract test runs separately on a schedule (api-contract.yml).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Offline unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements_test.txt
+      - run: pytest tests/ --ignore=tests/test_api_contract.py -v

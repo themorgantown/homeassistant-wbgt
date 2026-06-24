@@ -3,15 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
+    ALERT_RISK_LEVELS,
     CONF_ACCLIMATIZATION,
+    CONF_ALERT_DEVICE,
     CONF_API_URL,
     CONF_CLOTHING,
     CONF_COUNTRY,
@@ -61,6 +64,9 @@ _FAHRENHEIT_UNITS = {"°F", "F", "degF", "fahrenheit"}
 
 # Cap exponential backoff so a failing API is retried at most once an hour.
 MAX_BACKOFF_INTERVAL = timedelta(hours=1)
+
+# How far ahead the forecast-peak sensors look.
+FORECAST_HORIZON = timedelta(hours=24)
 
 
 def _stull_wet_bulb(t_c: float, rh: float) -> float:
@@ -112,15 +118,20 @@ def _scope_composite(results: list, country: str, state: str) -> dict:
     jurisdictions: any in-scope standard requiring stop-work wins; otherwise the
     schedule with the fewest work minutes per hour is the binding one.
     """
-    scoped = [
-        r for r in results
-        if r.get("applicable") and _standard_in_scope(r, country, state)
-    ]
+    in_scope = [r for r in results if _standard_in_scope(r, country, state)]
+    scoped = [r for r in in_scope if r.get("applicable")]
     stop = [r for r in scoped if (r.get("recommendation") or {}).get("stopWork")]
     advisory = [_standard_label(r) for r in scoped]
 
+    # No standard covers the user's jurisdiction *at all* — distinct from "rules
+    # cover it but none triggered at this WBGT", which is a legitimate safe
+    # state. Without coverage we cannot give jurisdiction-correct guidance, so
+    # flag it; the coordinator marks the entities unavailable rather than letting
+    # a SAFETY binary sensor read clear off an empty set.
+    scope_empty = not in_scope
+
     if stop:
-        return {
+        composite = {
             "stopWork": True,
             "workMinutesPerHour": None,
             "restMinutesPerHour": None,
@@ -128,31 +139,34 @@ def _scope_composite(results: list, country: str, state: str) -> dict:
             "advisoryStandards": advisory,
             "triggeredBy": _standard_label(stop[0]),
         }
+    else:
+        scheduled = [
+            r for r in scoped
+            if (r.get("recommendation") or {}).get("workMinutesPerHour") is not None
+        ]
+        if scheduled:
+            best = min(scheduled, key=lambda r: r["recommendation"]["workMinutesPerHour"])
+            rec = best["recommendation"]
+            composite = {
+                "stopWork": False,
+                "workMinutesPerHour": rec.get("workMinutesPerHour"),
+                "restMinutesPerHour": rec.get("restMinutesPerHour"),
+                "contributingStandards": [_standard_label(best)],
+                "advisoryStandards": advisory,
+                "triggeredBy": _standard_label(best),
+            }
+        else:
+            composite = {
+                "stopWork": False,
+                "workMinutesPerHour": None,
+                "restMinutesPerHour": None,
+                "contributingStandards": [],
+                "advisoryStandards": advisory,
+                "triggeredBy": None,
+            }
 
-    scheduled = [
-        r for r in scoped
-        if (r.get("recommendation") or {}).get("workMinutesPerHour") is not None
-    ]
-    if scheduled:
-        best = min(scheduled, key=lambda r: r["recommendation"]["workMinutesPerHour"])
-        rec = best["recommendation"]
-        return {
-            "stopWork": False,
-            "workMinutesPerHour": rec.get("workMinutesPerHour"),
-            "restMinutesPerHour": rec.get("restMinutesPerHour"),
-            "contributingStandards": [_standard_label(best)],
-            "advisoryStandards": advisory,
-            "triggeredBy": _standard_label(best),
-        }
-
-    return {
-        "stopWork": False,
-        "workMinutesPerHour": None,
-        "restMinutesPerHour": None,
-        "contributingStandards": [],
-        "advisoryStandards": advisory,
-        "triggeredBy": None,
-    }
+    composite["scopeEmpty"] = scope_empty
+    return composite
 
 
 def _derive_risk_level(composite: dict) -> str:
@@ -172,6 +186,11 @@ def _derive_risk_level(composite: dict) -> str:
     return "safe"
 
 
+def _is_restricted(data: dict) -> bool:
+    """A heat restriction is in force: work must stop, or risk is high or above."""
+    return bool(data.get("stop_work")) or data.get("risk_level") in ALERT_RISK_LEVELS
+
+
 def _closest_hour_entry(hourly_wbgt: list, now) -> dict | None:
     if not hourly_wbgt:
         return None
@@ -188,6 +207,35 @@ def _closest_hour_entry(hourly_wbgt: list, now) -> dict | None:
         if best_diff is None or diff < best_diff:
             best_diff = diff
             best = entry
+    return best
+
+
+def _forecast_peak(hourly_wbgt: list, tzname: str | None, now_utc) -> dict | None:
+    """Highest-WBGT hour within the next 24 hours of the forecast.
+
+    Each forecast entry carries its own ``date`` and ``time`` in the location's
+    timezone, so peaks are anchored to real instants rather than a bare hour.
+    Returns ``{"valueC": float, "when": datetime}`` (timezone-aware) or ``None``
+    when the forecast has no upcoming hours (e.g. non-forecast weather modes).
+    """
+    if not hourly_wbgt:
+        return None
+    tz = (dt_util.get_time_zone(tzname) if tzname else None) or dt_util.DEFAULT_TIME_ZONE
+    horizon = now_utc + FORECAST_HORIZON
+    best = None
+    for entry in hourly_wbgt:
+        try:
+            naive = datetime.strptime(f"{entry['date']} {entry['time']}", "%Y-%m-%d %H:%M")
+        except (KeyError, ValueError, TypeError):
+            continue
+        when = naive.replace(tzinfo=tz)
+        if when < now_utc or when > horizon:
+            continue
+        value = entry.get("valueC")
+        if value is None:
+            continue
+        if best is None or value > best["valueC"]:
+            best = {"valueC": value, "when": when}
     return best
 
 
@@ -245,6 +293,8 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         self._current_workload: str = DEFAULT_WORKLOAD
         self._mqtt_unsubscribe = None
         self._failure_count = 0
+        self._forecast_hourly: list = []
+        self._forecast_tz: str | None = None
         interval_min = self._config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
         super().__init__(
             hass,
@@ -308,6 +358,100 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         """Merge entry data with options so options-flow changes take effect immediately."""
         return {**self._config_entry.data, **self._config_entry.options}
 
+    def _composite_for(self, result: dict, country: str, state: str) -> dict:
+        """Scope an API response to the user's jurisdiction (fallback: API composite)."""
+        results = result.get("results") or []
+        return _scope_composite(results, country, state) if results else (result.get("composite") or {})
+
+    @property
+    def _alert_tag(self) -> str:
+        return f"heat_stress_{self._config_entry.entry_id}"
+
+    def _notify_service_for(self, device_id: str) -> str | None:
+        """Resolve a mobile_app device to its notify service, or None if missing."""
+        device = dr.async_get(self.hass).async_get(device_id)
+        if device is None or not device.name:
+            return None
+        # mobile_app derives the service from the device's original (integration)
+        # name, which a user rename in HA does not change — so use .name, not
+        # .name_by_user.
+        service = "mobile_app_" + slugify(device.name)
+        if not self.hass.services.has_service("notify", service):
+            _LOGGER.warning(
+                "Heat alert device has no notify.%s service (is the HA app installed?)",
+                service,
+            )
+            return None
+        return service
+
+    async def _handle_heat_alert(self, prev: dict, new: dict) -> None:
+        """Push a rich alert on the rising edge into a restriction; clear on recovery."""
+        device_id = self._config.get(CONF_ALERT_DEVICE)
+        if not device_id:
+            return
+
+        prev_restricted = _is_restricted(prev)
+        new_restricted = _is_restricted(new) and new.get("available", True)
+        escalated_to_stop = bool(new.get("stop_work")) and not bool(prev.get("stop_work"))
+
+        if new_restricted and (not prev_restricted or escalated_to_stop):
+            await self._async_send_alert(device_id, new)
+        elif prev_restricted and not new_restricted:
+            await self._async_clear_alert(device_id)
+
+    async def _async_send_alert(self, device_id: str, new: dict) -> None:
+        service = self._notify_service_for(device_id)
+        if service is None:
+            return
+
+        wbgt = new.get("wbgt_c")
+        if new.get("stop_work"):
+            title = "⛔ Heat alert: STOP WORK"
+            message = (
+                f"WBGT {wbgt}°C — all work must stop now. "
+                f"Driver: {new.get('triggered_by') or 'applicable standard'}."
+            )
+            color = "#b71c1c"
+        else:
+            title = f"⚠️ Heat alert: {new.get('risk_level')} risk"
+            message = (
+                f"WBGT {wbgt}°C — work {new.get('work_minutes')}/"
+                f"rest {new.get('rest_minutes')} min per hour, "
+                f"drink {new.get('hydration_ml_per_hr')} mL/hr."
+            )
+            color = "#e65100"
+
+        payload = {
+            "title": title,
+            "message": message,
+            "data": {
+                "tag": self._alert_tag,        # update the same notification in place
+                "group": "heat_stress",
+                "color": color,                # Android accent
+                "importance": "high",          # Android channel importance
+                "channel": "Heat alerts",
+                "ttl": 0,
+                "priority": "high",
+                "notification_icon": "mdi:thermometer-alert",
+                "push": {"interruption-level": "time-sensitive"},  # iOS
+                "actions": [
+                    {"action": "URI", "title": "Open dashboard", "uri": "/lovelace/heat-stress"},
+                ],
+            },
+        }
+        await self.hass.services.async_call("notify", service, payload, blocking=False)
+
+    async def _async_clear_alert(self, device_id: str) -> None:
+        service = self._notify_service_for(device_id)
+        if service is None:
+            return
+        await self.hass.services.async_call(
+            "notify",
+            service,
+            {"message": "clear_notification", "data": {"tag": self._alert_tag}},
+            blocking=False,
+        )
+
     async def _async_update_data(self) -> dict:
         # Base interval from config (re-read so options-flow changes take effect)
         base_interval = timedelta(
@@ -355,8 +499,29 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         # back to the API composite if the response carries no per-standard list.
         country = (self._config.get(CONF_COUNTRY) or self.hass.config.country or "").upper()
         state = (self._config.get(CONF_STATE) or "").upper()
-        results = result.get("results") or []
-        composite = _scope_composite(results, country, state) if results else (result.get("composite") or {})
+        composite = self._composite_for(result, country, state)
+
+        # Forecast lookahead: peak WBGT over the next 24 hours, plus the risk that
+        # WBGT would produce for this worker profile. The risk needs one extra
+        # /compare call (skipped when the peak is essentially the current value);
+        # a failure here must not sink the otherwise-successful update.
+        peak = _forecast_peak(self._forecast_hourly, self._forecast_tz, dt_util.utcnow())
+        forecast_peak_wbgt = forecast_peak_time = None
+        forecast_peak_risk = forecast_peak_stop = None
+        if peak is not None:
+            forecast_peak_wbgt = round(peak["valueC"], 1)
+            forecast_peak_time = peak["when"]
+            try:
+                if abs(peak["valueC"] - wbgt_c) > 0.1:
+                    peak_composite = self._composite_for(
+                        await self._call_compare_api(peak["valueC"]), country, state
+                    )
+                else:
+                    peak_composite = composite
+                forecast_peak_risk = _derive_risk_level(peak_composite)
+                forecast_peak_stop = peak_composite.get("stopWork", False)
+            except Exception as err:  # noqa: BLE001 - forecast risk is best-effort
+                _LOGGER.debug("Forecast peak risk lookup failed: %s", err)
 
         derived = result.get("derivedOutputs") or {}
         hydration = derived.get("hydration") or {}
@@ -369,7 +534,11 @@ class HeatStressCoordinator(DataUpdateCoordinator):
             else self._config.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)
         )
 
-        return {
+        data = {
+            # False when no standard covers the configured jurisdiction at all,
+            # so the entities go unavailable instead of reporting a misleading
+            # "no stop-work". See _scope_composite.
+            "available": not composite.get("scopeEmpty", False),
             "wbgt_c": input_summary.get("rawWbgtC", wbgt_c),
             "effective_wbgt_c": input_summary.get("effectiveWbgtC"),
             "stop_work": composite.get("stopWork", False),
@@ -387,9 +556,26 @@ class HeatStressCoordinator(DataUpdateCoordinator):
             "acclimatization": self._config.get(CONF_ACCLIMATIZATION, DEFAULT_ACCLIMATIZATION),
             "active_workload": active_workload,
             "workload_mode": workload_mode,
+            "forecast_peak_wbgt_c": forecast_peak_wbgt,
+            "forecast_peak_time": forecast_peak_time,
+            "forecast_peak_risk_level": forecast_peak_risk,
+            "forecast_peak_stop_work": forecast_peak_stop,
         }
 
+        # Fire a rich push alert on the rising edge into a restriction (and clear
+        # it when conditions normalize). Best-effort: never let it break an update.
+        try:
+            await self._handle_heat_alert(self.data or {}, data)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Heat alert dispatch failed: %s", err)
+
+        return data
+
     async def _get_wbgt(self) -> float | None:
+        # Only location-based modes carry an hourly forecast; clear any stale data
+        # so the forecast-peak sensors go empty in sensor/manual modes.
+        self._forecast_hourly = []
+        self._forecast_tz = None
         mode = self._config.get(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)
 
         if mode == WEATHER_MODE_LOCATION:
@@ -432,6 +618,9 @@ class HeatStressCoordinator(DataUpdateCoordinator):
             resp.raise_for_status()
             data = await resp.json()
         hourly = data.get("hourlyWbgt") or []
+        # Stash the forecast for the peak-lookahead sensors in _async_update_data.
+        self._forecast_hourly = hourly
+        self._forecast_tz = data.get("timezone")
         entry = _closest_hour_entry(hourly, dt_util.now())
         if entry is None:
             return None

@@ -6,7 +6,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import selector
 
 from .qr import (
@@ -22,6 +22,7 @@ from .const import (
     CLOTHING_LABELS,
     CLOTHING_OPTIONS,
     CONF_ACCLIMATIZATION,
+    CONF_ALERT_DEVICE,
     CONF_API_URL,
     CONF_CLOTHING,
     CONF_COUNTRY,
@@ -81,125 +82,135 @@ async def _test_api_connection(api_url: str) -> bool:
         return False
 
 
+# All the work-/standards-related and technical fields live behind this collapsed
+# header so first-time setup stays focused on "alert me when it's dangerously hot":
+# the visible fields are just location + the alert device. Sensible defaults mean a
+# beginner can submit without ever opening it.
+ADVANCED_SECTION = "advanced"
+
+
+def _flatten(user_input: dict) -> dict:
+    """Merge the collapsed advanced section's fields back up to the top level."""
+    flat = dict(user_input)
+    advanced = flat.pop(ADVANCED_SECTION, None)
+    if isinstance(advanced, dict):
+        flat.update(advanced)
+    return flat
+
+
+def _settings_schema(hass, current: dict) -> vol.Schema:
+    """Schema shared by setup and options: location + alert device up front, the
+    rest in a collapsed Advanced section. ``current`` pre-fills every field."""
+    ha_lat = hass.config.latitude
+    ha_lon = hass.config.longitude
+    default_country = (current.get(CONF_COUNTRY) or (hass.config.country or "")).upper()
+    if default_country not in SUPPORTED_COUNTRIES:
+        default_country = ""
+
+    def d(key, fallback):
+        return current.get(key, fallback)
+
+    advanced = vol.Schema({
+        vol.Required(CONF_WEATHER_MODE, default=d(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)): vol.In([
+            WEATHER_MODE_LOCATION,
+            WEATHER_MODE_TRACKED_ENTITY,
+            WEATHER_MODE_HA_SENSORS,
+            WEATHER_MODE_MANUAL_WBGT,
+        ]),
+        vol.Optional(CONF_LOCATION_ENTITY, default=d(CONF_LOCATION_ENTITY, "")): str,
+        vol.Optional(CONF_TEMP_ENTITY, default=d(CONF_TEMP_ENTITY, "")): str,
+        vol.Optional(CONF_HUMIDITY_ENTITY, default=d(CONF_HUMIDITY_ENTITY, "")): str,
+        vol.Optional(CONF_GLOBE_TEMP_ENTITY, default=d(CONF_GLOBE_TEMP_ENTITY, "")): str,
+        vol.Optional(CONF_WBGT_ENTITY, default=d(CONF_WBGT_ENTITY, "")): str,
+        vol.Required(CONF_WORKLOAD_MODE, default=d(CONF_WORKLOAD_MODE, DEFAULT_WORKLOAD_MODE)): vol.In([WORKLOAD_MODE_STATIC, WORKLOAD_MODE_MQTT]),
+        vol.Required(CONF_WORKLOAD, default=d(CONF_WORKLOAD, DEFAULT_WORKLOAD)): vol.In(WORKLOAD_OPTIONS),
+        vol.Optional(CONF_MQTT_TOPIC, default=d(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)): str,
+        vol.Required(CONF_ACCLIMATIZATION, default=d(CONF_ACCLIMATIZATION, DEFAULT_ACCLIMATIZATION)): vol.In(ACCLIMATIZATION_OPTIONS),
+        vol.Required(CONF_SHIFT_START, default=d(CONF_SHIFT_START, DEFAULT_SHIFT_START)): str,
+        vol.Required(CONF_SHIFT_END, default=d(CONF_SHIFT_END, DEFAULT_SHIFT_END)): str,
+        vol.Required(CONF_CLOTHING, default=d(CONF_CLOTHING, DEFAULT_CLOTHING)): vol.In(CLOTHING_OPTIONS),
+        vol.Required(CONF_COUNTRY, default=default_country): vol.In(SUPPORTED_COUNTRIES),
+        vol.Optional(CONF_STATE, default=d(CONF_STATE, DEFAULT_STATE)): vol.In(US_STATES),
+        vol.Required(CONF_API_URL, default=d(CONF_API_URL, DEFAULT_API_URL)): str,
+        vol.Required(CONF_UPDATE_INTERVAL, default=d(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): vol.All(int, vol.Range(min=1, max=1440)),
+    })
+
+    return vol.Schema({
+        vol.Optional(CONF_LATITUDE, default=d(CONF_LATITUDE, ha_lat)): vol.Coerce(float),
+        vol.Optional(CONF_LONGITUDE, default=d(CONF_LONGITUDE, ha_lon)): vol.Coerce(float),
+        vol.Optional(
+            CONF_ALERT_DEVICE,
+            description={"suggested_value": current.get(CONF_ALERT_DEVICE)},
+        ): selector.DeviceSelector(selector.DeviceSelectorConfig(integration="mobile_app")),
+        vol.Required(ADVANCED_SECTION): section(advanced, {"collapsed": True}),
+    })
+
+
+async def _validate_settings(hass, flat: dict, errors: dict) -> str:
+    """Validate a flattened settings dict; record a base-level error if any and
+    return the normalized API URL."""
+    api_url = (flat.get(CONF_API_URL) or DEFAULT_API_URL).rstrip("/")
+    if not await _test_api_connection(api_url):
+        errors["base"] = "cannot_connect"
+        return api_url
+
+    mode = flat.get(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)
+    if mode == WEATHER_MODE_LOCATION:
+        if flat.get(CONF_LATITUDE) is None or flat.get(CONF_LONGITUDE) is None:
+            errors["base"] = "missing_location"
+    elif mode == WEATHER_MODE_TRACKED_ENTITY:
+        if not (flat.get(CONF_LOCATION_ENTITY) or "").strip():
+            errors["base"] = "missing_location_entity"
+    elif mode == WEATHER_MODE_HA_SENSORS:
+        if not flat.get(CONF_TEMP_ENTITY) or not flat.get(CONF_HUMIDITY_ENTITY):
+            errors["base"] = "missing_sensors"
+    elif mode == WEATHER_MODE_MANUAL_WBGT:
+        if not flat.get(CONF_WBGT_ENTITY):
+            errors["base"] = "missing_wbgt_entity"
+
+    if not errors:
+        workload_mode = flat.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
+        if workload_mode == WORKLOAD_MODE_MQTT:
+            if not (flat.get(CONF_MQTT_TOPIC) or "").strip():
+                errors["base"] = "missing_mqtt_topic"
+            elif "mqtt" not in hass.config.components:
+                errors["base"] = "mqtt_not_available"
+
+    if not errors:
+        try:
+            _validate_time(flat.get(CONF_SHIFT_START, DEFAULT_SHIFT_START))
+            _validate_time(flat.get(CONF_SHIFT_END, DEFAULT_SHIFT_END))
+        except vol.Invalid:
+            errors["base"] = "invalid_time"
+
+    return api_url
+
+
 class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._data: dict = {}
-
     async def async_step_user(self, user_input=None) -> FlowResult:
         errors = {}
+        current = _flatten(user_input) if user_input is not None else {}
+
         if user_input is not None:
-            api_url = user_input[CONF_API_URL].rstrip("/")
-            ok = await _test_api_connection(api_url)
-            if not ok:
-                errors[CONF_API_URL] = "cannot_connect"
-            else:
+            api_url = await _validate_settings(self.hass, current, errors)
+            if not errors:
                 await self.async_set_unique_id(api_url)
                 self._abort_if_unique_id_configured()
-                self._data.update(user_input)
-                self._data[CONF_API_URL] = api_url
-                return await self.async_step_weather()
+                current[CONF_API_URL] = api_url
+                workload_mode = current.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
+                mode_label = (
+                    "MQTT" if workload_mode == WORKLOAD_MODE_MQTT
+                    else current.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)
+                )
+                return self.async_create_entry(
+                    title=f"Heat Stress Guidance ({mode_label})", data=current
+                )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_API_URL, default=DEFAULT_API_URL): str,
-                vol.Required(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(int, vol.Range(min=1, max=1440)),
-            }),
-            errors=errors,
-        )
-
-    async def async_step_weather(self, user_input=None) -> FlowResult:
-        errors = {}
-        if user_input is not None:
-            mode = user_input[CONF_WEATHER_MODE]
-            if mode == WEATHER_MODE_LOCATION:
-                if user_input.get(CONF_LATITUDE) is None or user_input.get(CONF_LONGITUDE) is None:
-                    errors["base"] = "missing_location"
-                else:
-                    self._data.update(user_input)
-                    return await self.async_step_worker()
-            elif mode == WEATHER_MODE_TRACKED_ENTITY:
-                if not user_input.get(CONF_LOCATION_ENTITY, "").strip():
-                    errors["base"] = "missing_location_entity"
-                else:
-                    self._data.update(user_input)
-                    return await self.async_step_worker()
-            elif mode == WEATHER_MODE_HA_SENSORS:
-                if not user_input.get(CONF_TEMP_ENTITY) or not user_input.get(CONF_HUMIDITY_ENTITY):
-                    errors["base"] = "missing_sensors"
-                else:
-                    self._data.update(user_input)
-                    return await self.async_step_worker()
-            elif mode == WEATHER_MODE_MANUAL_WBGT:
-                if not user_input.get(CONF_WBGT_ENTITY):
-                    errors["base"] = "missing_wbgt_entity"
-                else:
-                    self._data.update(user_input)
-                    return await self.async_step_worker()
-
-        ha_lat = self.hass.config.latitude
-        ha_lon = self.hass.config.longitude
-
-        return self.async_show_form(
-            step_id="weather",
-            data_schema=vol.Schema({
-                vol.Required(CONF_WEATHER_MODE, default=WEATHER_MODE_LOCATION): vol.In([
-                    WEATHER_MODE_LOCATION,
-                    WEATHER_MODE_TRACKED_ENTITY,
-                    WEATHER_MODE_HA_SENSORS,
-                    WEATHER_MODE_MANUAL_WBGT,
-                ]),
-                vol.Optional(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
-                vol.Optional(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_LOCATION_ENTITY, default=""): str,
-                vol.Optional(CONF_TEMP_ENTITY, default=""): str,
-                vol.Optional(CONF_HUMIDITY_ENTITY, default=""): str,
-                vol.Optional(CONF_GLOBE_TEMP_ENTITY, default=""): str,
-                vol.Optional(CONF_WBGT_ENTITY, default=""): str,
-            }),
-            errors=errors,
-        )
-
-    async def async_step_worker(self, user_input=None) -> FlowResult:
-        errors = {}
-        if user_input is not None:
-            workload_mode = user_input.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
-            if workload_mode == WORKLOAD_MODE_MQTT:
-                if not user_input.get(CONF_MQTT_TOPIC, "").strip():
-                    errors["base"] = "missing_mqtt_topic"
-                elif "mqtt" not in self.hass.config.components:
-                    errors["base"] = "mqtt_not_available"
-            if not errors:
-                try:
-                    _validate_time(user_input[CONF_SHIFT_START])
-                    _validate_time(user_input[CONF_SHIFT_END])
-                except vol.Invalid:
-                    errors["base"] = "invalid_time"
-            if not errors:
-                self._data.update(user_input)
-                mode_label = "MQTT" if workload_mode == WORKLOAD_MODE_MQTT else self._data.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)
-                return self.async_create_entry(title=f"Heat Stress Guidance ({mode_label})", data=self._data)
-
-        default_country = (self.hass.config.country or "").upper()
-        if default_country not in SUPPORTED_COUNTRIES:
-            default_country = ""
-
-        return self.async_show_form(
-            step_id="worker",
-            data_schema=vol.Schema({
-                vol.Required(CONF_WORKLOAD_MODE, default=DEFAULT_WORKLOAD_MODE): vol.In([WORKLOAD_MODE_STATIC, WORKLOAD_MODE_MQTT]),
-                vol.Required(CONF_WORKLOAD, default=DEFAULT_WORKLOAD): vol.In(WORKLOAD_OPTIONS),
-                vol.Optional(CONF_MQTT_TOPIC, default=DEFAULT_MQTT_TOPIC): str,
-                vol.Required(CONF_ACCLIMATIZATION, default=DEFAULT_ACCLIMATIZATION): vol.In(ACCLIMATIZATION_OPTIONS),
-                vol.Required(CONF_SHIFT_START, default=DEFAULT_SHIFT_START): str,
-                vol.Required(CONF_SHIFT_END, default=DEFAULT_SHIFT_END): str,
-                vol.Required(CONF_CLOTHING, default=DEFAULT_CLOTHING): vol.In(CLOTHING_OPTIONS),
-                vol.Required(CONF_COUNTRY, default=default_country): vol.In(SUPPORTED_COUNTRIES),
-                vol.Optional(CONF_STATE, default=DEFAULT_STATE): vol.In(US_STATES),
-            }),
+            data_schema=_settings_schema(self.hass, current),
             errors=errors,
         )
 
@@ -258,74 +269,23 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_configure(self, user_input=None) -> FlowResult:
         errors = {}
-        current = {**self._config_entry.data, **self._config_entry.options}
+        stored = {**self._config_entry.data, **self._config_entry.options}
+        current = stored
 
         if user_input is not None:
-            api_url = user_input[CONF_API_URL].rstrip("/")
-            ok = await _test_api_connection(api_url)
-            if not ok:
-                errors[CONF_API_URL] = "cannot_connect"
-
-            mode = user_input[CONF_WEATHER_MODE]
-            if mode == WEATHER_MODE_LOCATION:
-                if user_input.get(CONF_LATITUDE) is None or user_input.get(CONF_LONGITUDE) is None:
-                    errors["base"] = "missing_location"
-            elif mode == WEATHER_MODE_TRACKED_ENTITY:
-                if not user_input.get(CONF_LOCATION_ENTITY, "").strip():
-                    errors["base"] = "missing_location_entity"
-            elif mode == WEATHER_MODE_HA_SENSORS:
-                if not user_input.get(CONF_TEMP_ENTITY) or not user_input.get(CONF_HUMIDITY_ENTITY):
-                    errors["base"] = "missing_sensors"
-            elif mode == WEATHER_MODE_MANUAL_WBGT:
-                if not user_input.get(CONF_WBGT_ENTITY):
-                    errors["base"] = "missing_wbgt_entity"
-
-            workload_mode = user_input.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
-            if workload_mode == WORKLOAD_MODE_MQTT:
-                if not user_input.get(CONF_MQTT_TOPIC, "").strip():
-                    errors["base"] = "missing_mqtt_topic"
-                elif "mqtt" not in self.hass.config.components:
-                    errors["base"] = "mqtt_not_available"
+            flat = _flatten(user_input)
+            current = {**stored, **flat}
+            api_url = await _validate_settings(self.hass, current, errors)
             if not errors:
-                try:
-                    _validate_time(user_input[CONF_SHIFT_START])
-                    _validate_time(user_input[CONF_SHIFT_END])
-                except vol.Invalid:
-                    errors["base"] = "invalid_time"
-            if not errors:
-                user_input[CONF_API_URL] = api_url
-                return self.async_create_entry(title="", data={**current, **user_input})
-
-        ha_lat = self.hass.config.latitude
-        ha_lon = self.hass.config.longitude
+                current[CONF_API_URL] = api_url
+                # An emptied device selector is absent from the submission; drop it
+                # so the alert device can actually be cleared, not just changed.
+                if CONF_ALERT_DEVICE not in flat:
+                    current.pop(CONF_ALERT_DEVICE, None)
+                return self.async_create_entry(title="", data=current)
 
         return self.async_show_form(
             step_id="configure",
-            data_schema=vol.Schema({
-                vol.Required(CONF_API_URL, default=current.get(CONF_API_URL, DEFAULT_API_URL)): str,
-                vol.Required(CONF_WEATHER_MODE, default=current.get(CONF_WEATHER_MODE, WEATHER_MODE_LOCATION)): vol.In([
-                    WEATHER_MODE_LOCATION,
-                    WEATHER_MODE_TRACKED_ENTITY,
-                    WEATHER_MODE_HA_SENSORS,
-                    WEATHER_MODE_MANUAL_WBGT,
-                ]),
-                vol.Optional(CONF_LATITUDE, default=current.get(CONF_LATITUDE, ha_lat)): vol.Coerce(float),
-                vol.Optional(CONF_LONGITUDE, default=current.get(CONF_LONGITUDE, ha_lon)): vol.Coerce(float),
-                vol.Optional(CONF_LOCATION_ENTITY, default=current.get(CONF_LOCATION_ENTITY, "")): str,
-                vol.Optional(CONF_TEMP_ENTITY, default=current.get(CONF_TEMP_ENTITY, "")): str,
-                vol.Optional(CONF_HUMIDITY_ENTITY, default=current.get(CONF_HUMIDITY_ENTITY, "")): str,
-                vol.Optional(CONF_GLOBE_TEMP_ENTITY, default=current.get(CONF_GLOBE_TEMP_ENTITY, "")): str,
-                vol.Optional(CONF_WBGT_ENTITY, default=current.get(CONF_WBGT_ENTITY, "")): str,
-                vol.Required(CONF_WORKLOAD_MODE, default=current.get(CONF_WORKLOAD_MODE, DEFAULT_WORKLOAD_MODE)): vol.In([WORKLOAD_MODE_STATIC, WORKLOAD_MODE_MQTT]),
-                vol.Required(CONF_WORKLOAD, default=current.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)): vol.In(WORKLOAD_OPTIONS),
-                vol.Optional(CONF_MQTT_TOPIC, default=current.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)): str,
-                vol.Required(CONF_ACCLIMATIZATION, default=current.get(CONF_ACCLIMATIZATION, DEFAULT_ACCLIMATIZATION)): vol.In(ACCLIMATIZATION_OPTIONS),
-                vol.Required(CONF_SHIFT_START, default=current.get(CONF_SHIFT_START, DEFAULT_SHIFT_START)): str,
-                vol.Required(CONF_SHIFT_END, default=current.get(CONF_SHIFT_END, DEFAULT_SHIFT_END)): str,
-                vol.Required(CONF_CLOTHING, default=current.get(CONF_CLOTHING, DEFAULT_CLOTHING)): vol.In(CLOTHING_OPTIONS),
-                vol.Required(CONF_COUNTRY, default=current.get(CONF_COUNTRY, (self.hass.config.country or "").upper() if (self.hass.config.country or "").upper() in SUPPORTED_COUNTRIES else "")): vol.In(SUPPORTED_COUNTRIES),
-                vol.Optional(CONF_STATE, default=current.get(CONF_STATE, DEFAULT_STATE)): vol.In(US_STATES),
-                vol.Required(CONF_UPDATE_INTERVAL, default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): vol.All(int, vol.Range(min=1, max=1440)),
-            }),
+            data_schema=_settings_schema(self.hass, current),
             errors=errors,
         )

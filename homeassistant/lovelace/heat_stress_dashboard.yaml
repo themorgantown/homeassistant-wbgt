@@ -59,3 +59,35 @@ views:
               - entity: binary_sensor.heat_stress_stop_work
                 name: Stop Work Alert
                 icon: mdi:hand-back-right-off
+
+          # Plan-ahead banner — shows when the next-24h forecast peak is severe
+          # (location / tracked_entity modes only; empty otherwise).
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.heat_stress_forecast_peak_risk_level
+                state:
+                  - high
+                  - extreme
+                  - critical
+            card:
+              type: markdown
+              content: >
+                ## ☀️ Heat rising — plan ahead
+                Forecast peak **{{ states('sensor.heat_stress_forecast_peak_wbgt') }} °C**
+                ({{ states('sensor.heat_stress_forecast_peak_risk_level') }}) at
+                {{ as_timestamp(states('sensor.heat_stress_forecast_peak_time')) | timestamp_custom('%a %H:%M') }}.
+
+          # 24-hour forecast lookahead
+          - type: entities
+            title: Forecast — Next 24 h
+            entities:
+              - entity: sensor.heat_stress_forecast_peak_wbgt
+                name: Peak WBGT
+                icon: mdi:thermometer-chevron-up
+              - entity: sensor.heat_stress_forecast_peak_risk_level
+                name: Risk at Peak
+                icon: mdi:alert-circle-outline
+              - entity: sensor.heat_stress_forecast_peak_time
+                name: Peak Time
+                icon: mdi:clock-alert-outline
