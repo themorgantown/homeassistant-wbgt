@@ -90,24 +90,50 @@ def test_forecast_peak_falls_back_to_default_tz_for_unknown_zone():
 def test_closest_hour_entry_picks_nearest_time():
     now = datetime(2026, 6, 23, 12, 20, tzinfo=timezone.utc)
     hourly = [
-        {"time": "11:00", "valueC": 24.0},
-        {"time": "12:00", "valueC": 26.0},  # nearest to 12:20
-        {"time": "14:00", "valueC": 30.0},
+        _hour("2026-06-23", "11:00", 24.0),
+        _hour("2026-06-23", "12:00", 26.0),  # nearest to 12:20
+        _hour("2026-06-23", "14:00", 30.0),
     ]
-    assert _closest_hour_entry(hourly, now)["valueC"] == 26.0
+    assert _closest_hour_entry(hourly, "UTC", now)["valueC"] == 26.0
 
 
 def test_closest_hour_entry_skips_malformed_times():
     now = datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)
     hourly = [
-        {"time": "oops", "valueC": 99.0},
-        {"time": "12:00", "valueC": 26.0},
+        _hour("2026-06-23", "oops", 99.0),
+        _hour("2026-06-23", "12:00", 26.0),
     ]
-    assert _closest_hour_entry(hourly, now)["valueC"] == 26.0
+    assert _closest_hour_entry(hourly, "UTC", now)["valueC"] == 26.0
 
 
 def test_closest_hour_entry_empty_returns_none():
-    assert _closest_hour_entry([], datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)) is None
+    assert _closest_hour_entry([], "UTC", datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)) is None
+
+
+def test_closest_hour_entry_does_not_pick_wrong_day():
+    """WHY: this value is the live "current WBGT" that drives the stop-work
+    sensor and alerts. Matching bare clock time (ignoring the date) could pick a
+    clock-identical row on the wrong day and report a cooler value — masking a
+    real stop-work. Anchoring to date+time must pick the truly nearest instant."""
+    now = datetime(2026, 6, 23, 23, 30, tzinfo=timezone.utc)
+    hourly = [
+        _hour("2026-06-24", "23:00", 40.0),  # clock-close to 23:30, but ~23.5h away
+        _hour("2026-06-24", "00:00", 26.0),  # the true nearest instant (30 min out)
+    ]
+    assert _closest_hour_entry(hourly, "UTC", now)["valueC"] == 26.0
+
+
+def test_closest_hour_entry_uses_forecast_timezone():
+    """WHY: in tracked_entity mode the worker can be in another timezone. ``now``
+    is UTC but forecast times are in the location tz, so the match must compare
+    real instants, not naive clock minutes (which would pick the wrong hour by
+    the inter-zone offset)."""
+    now = datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)  # = 08:00 America/New_York (EDT)
+    hourly = [
+        _hour("2026-06-23", "08:00", 26.0),  # 12:00 UTC — the true nearest
+        _hour("2026-06-23", "12:00", 40.0),  # 16:00 UTC — clock-closest but 4h away
+    ]
+    assert _closest_hour_entry(hourly, "America/New_York", now)["valueC"] == 26.0
 
 
 # --- _estimate_wbgt / _stull_wet_bulb --------------------------------------

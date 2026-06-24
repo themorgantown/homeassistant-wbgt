@@ -97,6 +97,7 @@ All settings can be changed later via **Settings → Integrations → Heat Stres
 |---|---|---|
 | Latitude / Longitude | Your Home Assistant location | Used to fetch the heat forecast. Override for a specific job site. |
 | Alert device | *(none)* | Optional. A phone/tablet running the Home Assistant app that receives a rich push when a heat restriction begins. See [Heat alert notifications](#heat-alert-notifications). |
+| Worker's phone | *(none)* | Optional second device. Lets the worker's own phone get the same alert as the (often supervisor-held) Alert device. Alerts go to **both**, de-duplicated if they're the same device. |
 
 Everything below is under **Advanced** — open it only if you want to change it.
 
@@ -245,14 +246,23 @@ After restart, the entity `sensor.wbgt_noaa` will appear. In the integration set
 | Shift start | HH:MM (e.g. `07:00`) | Used by standards that apply time-of-day limits |
 | Shift end | HH:MM (e.g. `15:00`) | |
 | Clothing / PPE | Standard work / SMS coveralls / Polyolefin / Double-layer / Vapor-barrier suit | Heavier PPE traps heat — this applies a clothing adjustment factor to WBGT |
-| **Country** | ISO country code (e.g. `US`), or blank | **Scopes which standards apply.** Defaults to your Home Assistant country. Blank = global standards only. |
+| **Safety standard** | **La Isla Network / LIN** (default), or any of the 76 downloaded standards, or **Auto** | Which standard your guidance and alerts reflect. The list is downloaded live from the API. **Auto** keeps the jurisdiction "most-protective" composite (the prior behavior); pinning a standard makes guidance follow that one standard's work/rest + hydration schedule. See [Choosing a standard](#choosing-a-standard). |
+| **Country** | ISO country code (e.g. `US`), or blank | **Scopes which standards apply** (used by **Auto**, and by the safety floor when a standard is pinned). Defaults to your Home Assistant country. Blank = global standards only. |
 | **US state** | e.g. `NY`, or blank | Only used when Country is `US`. A state with its own rule (CA, CO, MD, MN, NV, OR, WA) adds it; any other state — including NY — uses US federal + global standards. |
 
-(The **Alert device** is an essential field shown above the Advanced section — see [Essentials](#essentials-always-shown).)
+(The **Alert device** and **Worker's phone** are essential fields shown above the Advanced section — see [Essentials](#essentials-always-shown).)
+
+#### Choosing a standard
+
+By default the integration uses the **La Isla Network RSH-s** protocol ("LIN") — the API's own recommended default, a rest/shade/hydration model built for outdoor workers. You can instead pin any of the 76 downloaded standards (NIOSH, ACGIH, ISO 7243, a country rule, …), or choose **Auto** to keep the most-protective composite across every standard that applies in your region.
+
+When you pin a single standard, a **safety floor** still applies: if a *legally-binding* rule for your configured Country/US state requires stopping work (for example a regional midday work ban), that **STOP WORK** alert fires even when your chosen standard would only schedule work/rest. Your pinned standard still drives the everyday work/rest and hydration numbers; the `triggered_by` attribute names whichever rule forced a stop. This means a pinned standard can never *under-alert* relative to local law.
+
+> Existing installs that predate this field keep **Auto** until you change it, so upgrading doesn't silently alter your alerts.
 
 ### Heat alert notifications
 
-If you pick an **Alert device**, the integration pushes a rich notification straight to that phone/tablet the moment a heat restriction begins — no automation to write. A restriction is a rising edge into **stop-work** or **high / extreme / critical** risk.
+If you pick an **Alert device** and/or a **Worker's phone**, the integration pushes a rich notification straight to that phone/tablet the moment a heat restriction begins — no automation to write. Both targets are notified (de-duplicated if you pick the same device for each), so a worker and a supervisor can be alerted at once. A restriction is a rising edge into **stop-work** or **high / extreme / critical** risk.
 
 The notification:
 - shows the current WBGT and either the work/rest/hydration targets or a **STOP WORK** instruction, with the binding standard;

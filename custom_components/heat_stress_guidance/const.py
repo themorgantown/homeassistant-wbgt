@@ -53,6 +53,19 @@ CONF_STATE = "state"
 DEFAULT_COUNTRY = ""  # blank → fall back to hass.config.country, else global-only
 DEFAULT_STATE = ""    # blank → US federal + global standards only
 
+# Single-standard selection. STANDARD_AUTO keeps the jurisdiction "most
+# protective" composite (_scope_composite). Any other value is a standard id
+# from GET /api/v1/standards: guidance then reflects that one standard's
+# work/rest + hydration schedule. A *missing* key falls back to AUTO so existing
+# installs keep their current behavior on upgrade. Even when a single standard
+# is pinned, a binding in-scope stop-work is still honored (a safety floor in
+# _composite_for) so a chosen standard can never under-alert relative to a
+# legally-binding local rule. LIN (la_isla_network_rshs) is the API's own
+# priority:"default" protocol and is the default for new installs.
+CONF_STANDARD = "standard"
+STANDARD_AUTO = "auto"
+DEFAULT_STANDARD = "la_isla_network_rshs"  # La Isla Network RSH-s — "LIN"
+
 # Jurisdiction tags the API uses for worldwide standards (not tied to a country).
 GLOBAL_JURISDICTIONS = {"global", "global_apparel", "global_oil_gas", "global_sports"}
 
@@ -95,6 +108,10 @@ CONF_API_URL = "api_url"
 CONF_UPDATE_INTERVAL = "update_interval_minutes"
 # Optional mobile_app device that receives rich push alerts on a restriction event.
 CONF_ALERT_DEVICE = "alert_device"
+# Optional second mobile_app device — the worker's own phone. Heat alerts are
+# pushed to both this and CONF_ALERT_DEVICE (deduped when they are the same
+# device); either may be left unset.
+CONF_WORKER_DEVICE = "worker_device"
 # Risk tiers that count as a "heat restriction" worth a push alert (stop-work is
 # always included regardless of tier).
 ALERT_RISK_LEVELS = {"high", "extreme", "critical"}

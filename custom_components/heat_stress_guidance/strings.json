@@ -7,7 +7,8 @@
         "data": {
           "latitude": "Your latitude (for the heat forecast)",
           "longitude": "Your longitude (for the heat forecast)",
-          "alert_device": "Alert device (phone/tablet to notify)"
+          "alert_device": "Alert device (phone/tablet to notify)",
+          "worker_device": "Worker's phone (also gets heat alerts)"
         },
         "sections": {
           "advanced": {
@@ -27,6 +28,7 @@
               "shift_start": "Shift start (HH:MM)",
               "shift_end": "Shift end (HH:MM)",
               "clothing": "Clothing / PPE",
+              "standard": "Safety standard (default: La Isla Network / LIN)",
               "country": "Country (scopes which safety standards apply)",
               "state": "US state (blank = federal + global only)",
               "api_url": "API URL",
@@ -38,6 +40,7 @@
     },
     "error": {
       "cannot_connect": "Cannot reach the API. Check the URL and try again.",
+      "invalid_api_url": "Enter a valid https:// API URL (http is allowed only for a local or self-hosted server).",
       "missing_location": "Latitude and longitude are required for location mode.",
       "missing_location_entity": "A person or device tracker entity is required for tracked_entity mode.",
       "missing_sensors": "Temperature and humidity entity IDs are required for ha_sensors mode.",
@@ -45,6 +48,9 @@
       "invalid_time": "Shift times must be in HH:MM format (e.g. 07:00).",
       "mqtt_not_available": "MQTT integration is not configured. Add the MQTT integration in Home Assistant first.",
       "missing_mqtt_topic": "An MQTT topic is required when using MQTT workload detection."
+    },
+    "abort": {
+      "already_configured": "This integration is already configured."
     }
   },
   "options": {
@@ -63,7 +69,7 @@
       },
       "show_qr": {
         "title": "OwnTracks connection QR code",
-        "description": "Scan this in the OwnTracks app: open OwnTracks → Settings → Scan QR code. It configures OwnTracks to send location to this Home Assistant instance over the OwnTracks webhook — no typing required. Edit the identity fields and resubmit to regenerate the code.",
+        "description": "Scan this in the OwnTracks app: open OwnTracks → Settings → Scan QR code. It configures OwnTracks to send location to this Home Assistant instance over the OwnTracks webhook — no typing required. Edit the identity fields and resubmit to regenerate the code.\n\n⚠️ Treat this code like a password: anyone who scans or screenshots it can submit location for this worker. Don't share or store the image; scan it once, then close this dialog. If it leaks, rotate the connection by deleting and re-adding the OwnTracks integration.",
         "data": {
           "user": "Username",
           "deviceid": "Device ID",
@@ -72,10 +78,12 @@
       },
       "configure": {
         "title": "Update settings",
+        "description": "Location and notification devices are up front; everything else is under Advanced.",
         "data": {
           "latitude": "Your latitude (for the heat forecast)",
           "longitude": "Your longitude (for the heat forecast)",
-          "alert_device": "Alert device (phone/tablet to notify)"
+          "alert_device": "Alert device (phone/tablet to notify)",
+          "worker_device": "Worker's phone (also gets heat alerts)"
         },
         "sections": {
           "advanced": {
@@ -95,6 +103,7 @@
               "shift_start": "Shift start (HH:MM)",
               "shift_end": "Shift end (HH:MM)",
               "clothing": "Clothing / PPE",
+              "standard": "Safety standard (default: La Isla Network / LIN)",
               "country": "Country (scopes which safety standards apply)",
               "state": "US state (blank = federal + global only)",
               "api_url": "API URL",
@@ -106,6 +115,7 @@
     },
     "error": {
       "cannot_connect": "Cannot reach the API. Check the URL and try again.",
+      "invalid_api_url": "Enter a valid https:// API URL (http is allowed only for a local or self-hosted server).",
       "missing_location": "Latitude and longitude are required for location mode.",
       "missing_location_entity": "A person or device tracker entity is required for tracked_entity mode.",
       "missing_sensors": "Temperature and humidity entity IDs are required for ha_sensors mode.",

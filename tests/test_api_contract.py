@@ -58,6 +58,7 @@ ALWAYS_PRESENT = [
 # user's jurisdiction (_scope_composite / _standard_in_scope). The integration
 # no longer trusts the API's global `composite`; it recomputes from results[].
 RESULTS_FIELDS = [
+    "results[].standardId",
     "results[].applicable",
     "results[].jurisdiction",
     "results[].countryCode",
@@ -144,6 +145,27 @@ def test_results_carry_jurisdiction_fields():
     # At least one global standard (countryCode null) must exist — these are the
     # baseline that always applies regardless of the user's jurisdiction scope.
     assert any(r.get("countryCode") is None for r in results), "expected ≥1 global standard"
+    # The default pinned standard (LIN) must be one the /compare response carries,
+    # or single-standard selection would fall through to scopeEmpty for everyone
+    # on the default config.
+    assert any(r.get("standardId") == "la_isla_network_rshs" for r in results), (
+        "expected the LIN default standard (la_isla_network_rshs) in results[]"
+    )
+
+
+def test_standards_endpoint_lists_lin_default():
+    """The config flow downloads GET /api/v1/standards to populate the standard
+    selector and defaults to LIN. Guard that the endpoint exists, returns
+    id+displayName per standard, and still carries la_isla_network_rshs."""
+    resp = requests.get(f"{API_BASE}/api/v1/standards", timeout=TIMEOUT)
+    assert resp.status_code == 200, resp.text
+    standards = resp.json().get("standards")
+    assert isinstance(standards, list) and standards, "standards[] must be a non-empty list"
+    for s in standards:
+        assert s.get("id") and s.get("displayName"), f"standard missing id/displayName: {s}"
+    assert any(s.get("id") == "la_isla_network_rshs" for s in standards), (
+        "expected the LIN default standard (la_isla_network_rshs) in /api/v1/standards"
+    )
 
 
 def test_weather_endpoint_returns_hourly_wbgt():

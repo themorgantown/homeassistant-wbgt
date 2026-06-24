@@ -45,6 +45,10 @@ def _common_attrs(data: dict) -> dict:
         "acclimatization": data.get("acclimatization"),
         "clothing": data.get("clothing"),
         "effective_wbgt_c": data.get("effective_wbgt_c"),
+        # True when WBGT is a shade-only local estimate (ha_sensors mode, no globe
+        # sensor): it undercounts in-sun radiant load and is not safe to rely on
+        # for sun-exposed outdoor work.
+        "wbgt_estimate_no_globe": data.get("wbgt_estimate_no_globe", False),
     }
 
 

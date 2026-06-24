@@ -13,9 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.heat_stress_guidance.coordinator import (
+    _apply_safety_floor,
     _derive_risk_level,
     _is_restricted,
     _scope_composite,
+    _single_standard_composite,
     _standard_in_scope,
 )
 from custom_components.heat_stress_guidance.binary_sensor import StopWorkBinarySensor
@@ -25,13 +27,14 @@ from custom_components.heat_stress_guidance.sensor import WbgtSensor
 # --- helpers ---------------------------------------------------------------
 
 
-def _std(jurisdiction, *, country=None, applicable=True, stop=False, work=None, name="std"):
+def _std(jurisdiction, *, country=None, applicable=True, stop=False, work=None, name="std", standard_id=None):
     """Build one API ``results[]`` entry."""
     rec = {"stopWork": stop}
     if work is not None:
         rec["workMinutesPerHour"] = work
         rec["restMinutesPerHour"] = 60 - work
     return {
+        "standardId": standard_id,
         "displayName": name,
         "jurisdiction": jurisdiction,
         "countryCode": country,
@@ -127,6 +130,82 @@ def test_foreign_stop_work_does_not_hijack_local_guidance():
     assert composite["workMinutesPerHour"] == 45  # from the global standard
 
 
+# --- single-standard selection + the pinned-standard safety floor ----------
+#
+# A worker can pin one standard (default LIN) so guidance reflects that
+# standard's schedule. These guard the two safety invariants: (1) a pinned
+# standard that isn't in the response yields *no* guidance (unavailable), never
+# a silent "safe"; (2) the safety floor means a pinned standard can never
+# suppress a legally-binding in-scope stop-work.
+
+
+LIN_ID = "la_isla_network_rshs"
+LIN = _std("global", country=None, work=20, name="LIN", standard_id=LIN_ID)
+
+
+def test_single_standard_uses_only_the_chosen_standard():
+    composite = _single_standard_composite([LIN, US_FEDERAL, CALIFORNIA], LIN_ID)
+    assert composite["scopeEmpty"] is False
+    assert composite["workMinutesPerHour"] == 20  # LIN's schedule, not the strictest
+    assert composite["contributingStandards"] == ["LIN"]
+    assert composite["triggeredBy"] == "LIN"
+
+
+def test_single_standard_absent_is_scope_empty():
+    """The chosen standard isn't in the response at all → no guidance to give,
+    so entities go unavailable rather than reading a silent 'safe'."""
+    composite = _single_standard_composite([US_FEDERAL], LIN_ID)
+    assert composite["scopeEmpty"] is True
+    assert composite["stopWork"] is False  # present but not authoritative
+
+
+def test_single_standard_present_but_not_applicable_is_covered_safe():
+    """Present but not applicable at this mild WBGT is a legitimate covered-safe
+    state — available, no schedule — distinct from 'no coverage'."""
+    mild = _std("global", country=None, applicable=False, name="LIN", standard_id=LIN_ID)
+    composite = _single_standard_composite([mild], LIN_ID)
+    assert composite["scopeEmpty"] is False
+    assert composite["workMinutesPerHour"] is None
+
+
+def test_single_standard_honors_its_own_stop_work():
+    stop = _std("global", country=None, stop=True, name="LIN", standard_id=LIN_ID)
+    composite = _single_standard_composite([stop], LIN_ID)
+    assert composite["stopWork"] is True
+    assert composite["triggeredBy"] == "LIN"
+
+
+def test_safety_floor_forces_stop_work_from_a_binding_local_rule():
+    """The whole point of the floor: a worker pinned LIN (work/rest), but a
+    legally-binding in-scope rule (e.g. a midday ban) requires stop-work — the
+    alert must still fire, labelled with the rule that triggered it."""
+    pinned = _single_standard_composite([LIN, UAE], LIN_ID)  # LIN says work 20
+    assert pinned["stopWork"] is False
+    floored = _apply_safety_floor(pinned, _scope_composite([LIN, UAE], "AE", ""))
+    assert floored["stopWork"] is True
+    assert floored["triggeredBy"] == "UAE midday ban"
+    assert "LIN" in floored["advisoryStandards"]  # chosen standard kept as advisory
+
+
+def test_safety_floor_does_not_fire_for_a_foreign_stop_work():
+    """A stop-work from a standard *outside* the worker's jurisdiction must not
+    be floored in — that would re-introduce the cross-border hijack scoping
+    exists to prevent."""
+    pinned = _single_standard_composite([LIN, UAE], LIN_ID)
+    floored = _apply_safety_floor(pinned, _scope_composite([LIN, UAE], "US", "NY"))
+    assert floored["stopWork"] is False
+    assert floored["workMinutesPerHour"] == 20  # LIN's schedule survives
+
+
+def test_safety_floor_keeps_pinned_stop_work():
+    pinned = _single_standard_composite(
+        [_std("global", country=None, stop=True, name="LIN", standard_id=LIN_ID)], LIN_ID
+    )
+    floored = _apply_safety_floor(pinned, {"stopWork": False})
+    assert floored["stopWork"] is True
+    assert floored["triggeredBy"] == "LIN"
+
+
 # --- _derive_risk_level boundaries -----------------------------------------
 
 
@@ -152,6 +231,19 @@ def test_derive_risk_level(composite, expected):
 def test_stop_work_outranks_a_present_schedule():
     # Defensive: if both flags are set, stop-work must dominate.
     assert _derive_risk_level({"stopWork": True, "workMinutesPerHour": 60}) == "critical"
+
+
+def test_alert_threshold_aligns_with_risk_tiers():
+    """WHY: ALERT_RISK_LEVELS gates whether a phone push fires, and
+    _derive_risk_level buckets work-minutes into those tiers. Pin the seam at the
+    documented ≤15 boundary so moving either the cutoff or the alert set across
+    that line fails here instead of silently dropping (or spamming) alerts."""
+    from custom_components.heat_stress_guidance.const import ALERT_RISK_LEVELS
+
+    assert _derive_risk_level({"workMinutesPerHour": 15}) in ALERT_RISK_LEVELS
+    assert _derive_risk_level({"workMinutesPerHour": 16}) not in ALERT_RISK_LEVELS
+    assert _derive_risk_level({"workMinutesPerHour": 0}) in ALERT_RISK_LEVELS  # extreme
+    assert _derive_risk_level({"stopWork": True}) in ALERT_RISK_LEVELS  # critical
 
 
 # --- _is_restricted --------------------------------------------------------
