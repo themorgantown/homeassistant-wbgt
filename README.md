@@ -24,9 +24,11 @@ Click the button above → add the repository as an **Integration** → **Downlo
 
 Or: **Settings → Integrations → Add Integration → Heat Stress Guidance**
 
-**3. Confirm and submit**: your latitude/longitude are pre-filled from Home Assistant. Optionally pick a phone/tablet under **Alert device** to receive push alerts. Click Submit — everything else uses sensible defaults.
+**3. Confirm and submit**: give this worker (or site) a **name**, your latitude/longitude are pre-filled from Home Assistant, and you can optionally pick a phone/tablet under **Alert device** to receive push alerts. Click Submit — everything else uses sensible defaults.
 
 That's it. The integration's entities appear immediately. Want to change the data source, work intensity, shift times, or region? Expand **Advanced** during setup, or adjust it any time under **Configure**.
+
+**Tracking more than one worker?** Add the integration once per worker — each is its own entry with its own name, location/phone, standard, alerts, and sensors (`sensor.alice_wbgt`, `sensor.bob_wbgt`, …). See [Multiple workers](#multiple-workers).
 
 ---
 
@@ -271,6 +273,19 @@ The notification:
 - uses a stable `tag`, so it **updates in place** as conditions escalate and **auto-clears** when they return to normal.
 
 The device list is populated from devices that have the Home Assistant Companion app installed (the `mobile_app` integration). For more elaborate routing (multiple recipients, escalation, TTS), use the automation examples below instead.
+
+### Multiple workers
+
+The integration is **one config entry per worker** (or per site). Add it again for each person you want to monitor — **Settings → Integrations → Heat Stress Guidance → Add** — and give each a distinct **name** (Alice, Bob, North Tower…). Each entry is fully independent: its own location source, safety standard, work profile, alert + worker phones, and its own device and entities (`sensor.alice_wbgt`, `binary_sensor.bob_stop_work`, …). Re-using a name is rejected so two entries can't fight over the same worker.
+
+**Linking each worker's phone with one scan.** Open a worker's entry → **Configure → Show connection QR code**. The QR's identity defaults to that worker's name, and **Track this worker using the scanned phone's location** is on by default. When the worker scans it in the [OwnTracks app](#linking-a-phone-with-the-owntracks-qr-code):
+
+1. OwnTracks starts sending that phone's location to Home Assistant, which appears as `device_tracker.<name>_phone`;
+2. the worker's entry is automatically switched to track that `device_tracker`, so their live location drives their WBGT, risk, and alerts — no manual entity wiring.
+
+Repeat per worker: each scans their own QR, each flows into their own monitoring. (The entry shows *unavailable* until the first location arrives — expected until the worker scans.) Leave the box unticked if you'd rather keep a fixed location or HA sensors as that worker's source.
+
+> The **name** sets the entry, device, entities, and the scanned phone's tracker id, so it's fixed once the entry exists — to rename a worker, remove and re-add the entry.
 
 ### Why country/state matters
 

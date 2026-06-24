@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, WORKLOAD_MODE_STATIC
+from .const import CONF_WORKER_NAME, DEFAULT_WORKER_NAME, DOMAIN, WORKLOAD_MODE_STATIC
 from .coordinator import HeatStressCoordinator
 
 
@@ -74,9 +74,12 @@ class _HeatStressSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self):
+        # One HA device per worker, named for the worker so entities read
+        # sensor.<worker>_wbgt and a fleet stays legible.
+        name = self._entry.data.get(CONF_WORKER_NAME) or DEFAULT_WORKER_NAME
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Heat Stress",
+            "name": name,
             "manufacturer": "Heat Guidance Calculator",
             "model": "heat-guidance-calculator.pages.dev",
         }

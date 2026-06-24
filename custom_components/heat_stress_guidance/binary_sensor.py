@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_WORKER_NAME, DEFAULT_WORKER_NAME, DOMAIN
 from .coordinator import HeatStressCoordinator
 
 
@@ -51,9 +51,10 @@ class StopWorkBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def device_info(self):
+        name = self._entry.data.get(CONF_WORKER_NAME) or DEFAULT_WORKER_NAME
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Heat Stress",
+            "name": name,
             "manufacturer": "Heat Guidance Calculator",
             "model": "heat-guidance-calculator.pages.dev",
         }

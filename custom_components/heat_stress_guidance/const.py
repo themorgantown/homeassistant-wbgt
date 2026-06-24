@@ -112,6 +112,13 @@ CONF_ALERT_DEVICE = "alert_device"
 # pushed to both this and CONF_ALERT_DEVICE (deduped when they are the same
 # device); either may be left unset.
 CONF_WORKER_DEVICE = "worker_device"
+
+# Worker / site label. Each worker is a separate config entry, so this names the
+# entry, the Home Assistant device, the entities (e.g. sensor.alice_wbgt), and —
+# slugified — the OwnTracks identity the QR provisions, so scanning a worker's
+# phone yields device_tracker.<name>_phone, which that worker's entry tracks.
+CONF_WORKER_NAME = "worker_name"
+DEFAULT_WORKER_NAME = "Worker"
 # Risk tiers that count as a "heat restriction" worth a push alert (stop-work is
 # always included regardless of tier).
 ALERT_RISK_LEVELS = {"high", "extreme", "critical"}

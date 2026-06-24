@@ -36,6 +36,7 @@ from .const import (
     CONF_WBGT_ENTITY,
     CONF_WEATHER_MODE,
     CONF_WORKER_DEVICE,
+    CONF_WORKER_NAME,
     CONF_WORKLOAD,
     CONF_WORKLOAD_MODE,
     DEFAULT_ACCLIMATIZATION,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_SHIFT_END,
     DEFAULT_SHIFT_START,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_WORKER_NAME,
     DEFAULT_WORKLOAD,
     DOMAIN,
     GLOBAL_JURISDICTIONS,
@@ -534,16 +536,19 @@ class HeatStressCoordinator(DataUpdateCoordinator):
         if service is None:
             return
 
+        # Name the worker in the alert so a supervisor watching several at once
+        # knows who it's about (each worker is its own entry).
+        who = self._config_entry.data.get(CONF_WORKER_NAME) or DEFAULT_WORKER_NAME
         wbgt = new.get("wbgt_c")
         if new.get("stop_work"):
-            title = "⛔ Heat alert: STOP WORK"
+            title = f"⛔ {who} — heat alert: STOP WORK"
             message = (
                 f"WBGT {wbgt}°C — all work must stop now. "
                 f"Driver: {new.get('triggered_by') or 'applicable standard'}."
             )
             color = "#b71c1c"
         else:
-            title = f"⚠️ Heat alert: {new.get('risk_level')} risk"
+            title = f"⚠️ {who} — heat alert: {new.get('risk_level')} risk"
             message = (
                 f"WBGT {wbgt}°C — work {new.get('work_minutes')}/"
                 f"rest {new.get('rest_minutes')} min per hour, "

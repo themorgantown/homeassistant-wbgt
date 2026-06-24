@@ -11,6 +11,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import slugify
 
 from .qr import (
     CloudhookUnavailable,
@@ -45,6 +46,7 @@ from .const import (
     CONF_WBGT_ENTITY,
     CONF_WEATHER_MODE,
     CONF_WORKER_DEVICE,
+    CONF_WORKER_NAME,
     CONF_WORKLOAD,
     CONF_WORKLOAD_MODE,
     DEFAULT_ACCLIMATIZATION,
@@ -56,6 +58,7 @@ from .const import (
     DEFAULT_STANDARD,
     DEFAULT_STATE,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_WORKER_NAME,
     DEFAULT_WORKLOAD,
     DEFAULT_WORKLOAD_MODE,
     DOMAIN,
@@ -176,12 +179,16 @@ def _flatten(user_input: dict) -> dict:
     return flat
 
 
-def _settings_schema(hass, current: dict, standards: list, default_standard: str) -> vol.Schema:
+def _settings_schema(
+    hass, current: dict, standards: list, default_standard: str, with_name: bool = False
+) -> vol.Schema:
     """Schema shared by setup and options: location + alert/worker devices up
     front, the rest in a collapsed Advanced section. ``current`` pre-fills every
     field; ``standards`` populates the standard selector; ``default_standard`` is
     the fallback when the entry has no saved standard (LIN for new installs,
-    Auto for existing ones, so an upgrade doesn't silently change behavior)."""
+    Auto for existing ones, so an upgrade doesn't silently change behavior).
+    ``with_name`` adds the worker/site name field (setup only — it names the
+    entry, device, and entities, and is fixed once the entry exists)."""
     ha_lat = hass.config.latitude
     ha_lon = hass.config.longitude
     default_country = (current.get(CONF_COUNTRY) or (hass.config.country or "")).upper()
@@ -225,7 +232,11 @@ def _settings_schema(hass, current: dict, standards: list, default_standard: str
         vol.Required(CONF_UPDATE_INTERVAL, default=d(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): vol.All(int, vol.Range(min=1, max=1440)),
     })
 
-    return vol.Schema({
+    top: dict = {}
+    if with_name:
+        # First field at setup: each worker is its own entry, named here.
+        top[vol.Required(CONF_WORKER_NAME, default=d(CONF_WORKER_NAME, DEFAULT_WORKER_NAME))] = str
+    top.update({
         vol.Optional(CONF_LATITUDE, default=d(CONF_LATITUDE, ha_lat)): vol.Coerce(float),
         vol.Optional(CONF_LONGITUDE, default=d(CONF_LONGITUDE, ha_lon)): vol.Coerce(float),
         vol.Optional(
@@ -238,6 +249,7 @@ def _settings_schema(hass, current: dict, standards: list, default_standard: str
         ): selector.DeviceSelector(selector.DeviceSelectorConfig(integration="mobile_app")),
         vol.Required(ADVANCED_SECTION): section(advanced, {"collapsed": True}),
     })
+    return vol.Schema(top)
 
 
 async def _validate_settings(hass, flat: dict, errors: dict) -> str:
@@ -293,24 +305,25 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             api_url = await _validate_settings(self.hass, current, errors)
             if not errors:
-                await self.async_set_unique_id(api_url)
+                # One config entry per worker — keyed on the worker name, not the
+                # API URL (which every worker shares). The slug also disambiguates
+                # the entry's OwnTracks identity. Re-adding the same name aborts so
+                # two entries can't claim the same worker / device_tracker.
+                name = (current.get(CONF_WORKER_NAME) or "").strip() or DEFAULT_WORKER_NAME
+                current[CONF_WORKER_NAME] = name
+                await self.async_set_unique_id(slugify(name))
                 self._abort_if_unique_id_configured()
                 current[CONF_API_URL] = api_url
-                workload_mode = current.get(CONF_WORKLOAD_MODE, WORKLOAD_MODE_STATIC)
-                mode_label = (
-                    "MQTT" if workload_mode == WORKLOAD_MODE_MQTT
-                    else current.get(CONF_WORKLOAD, DEFAULT_WORKLOAD)
-                )
-                return self.async_create_entry(
-                    title=f"Heat Stress Guidance ({mode_label})", data=current
-                )
+                return self.async_create_entry(title=name, data=current)
 
         standards = await _fetch_standards(
             self.hass, current.get(CONF_API_URL) or DEFAULT_API_URL
         )
         return self.async_show_form(
             step_id="user",
-            data_schema=_settings_schema(self.hass, current, standards, DEFAULT_STANDARD),
+            data_schema=_settings_schema(
+                self.hass, current, standards, DEFAULT_STANDARD, with_name=True
+            ),
             errors=errors,
         )
 
@@ -332,22 +345,36 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_show_qr(self, user_input=None) -> FlowResult:
+        # Default the OwnTracks identity to this worker's name, so scanning their
+        # phone yields device_tracker.<name>_phone — the tracker this entry links to.
+        name = self._config_entry.data.get(CONF_WORKER_NAME) or DEFAULT_WORKER_NAME
+        default_user = slugify(name) or DEFAULT_USER
+
         if user_input is not None:
             identity = (
-                (user_input.get("user") or "").strip() or DEFAULT_USER,
+                (user_input.get("user") or "").strip() or default_user,
                 (user_input.get("deviceid") or "").strip() or DEFAULT_DEVICE_ID,
                 (user_input.get("trackerid") or "").strip() or DEFAULT_TRACKER_ID,
             )
             # Submitting without changing any identity field means "I'm done" —
-            # finish the flow so the dialog closes (preserving existing options),
-            # instead of re-rendering the same QR forever. Editing a field and
-            # resubmitting falls through below to regenerate the QR.
+            # finish the flow so the dialog closes, instead of re-rendering the
+            # same QR forever. Editing a field and resubmitting falls through
+            # below to regenerate the QR.
             if identity == self._qr_identity:
-                return self.async_create_entry(
-                    title="", data=dict(self._config_entry.options)
-                )
+                options = dict(self._config_entry.options)
+                if user_input.get("link_tracking", True):
+                    qr_user, qr_device, _ = identity
+                    # OwnTracks publishes as device_tracker.<user>_<device>
+                    # (slugified). Point this worker's entry at that tracker so
+                    # their location flows into their monitoring the moment they
+                    # scan — no manual entity wiring.
+                    options[CONF_WEATHER_MODE] = WEATHER_MODE_TRACKED_ENTITY
+                    options[CONF_LOCATION_ENTITY] = (
+                        f"device_tracker.{slugify(qr_user)}_{slugify(qr_device)}"
+                    )
+                return self.async_create_entry(title="", data=options)
         else:
-            identity = (DEFAULT_USER, DEFAULT_DEVICE_ID, DEFAULT_TRACKER_ID)
+            identity = (default_user, DEFAULT_DEVICE_ID, DEFAULT_TRACKER_ID)
 
         user, device_id, tracker_id = identity
         try:
@@ -370,6 +397,7 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional("user", default=user): str,
                 vol.Optional("deviceid", default=device_id): str,
                 vol.Optional("trackerid", default=tracker_id): str,
+                vol.Optional("link_tracking", default=True): bool,
                 vol.Optional("qr"): selector.QrCodeSelector(
                     config=selector.QrCodeSelectorConfig(
                         data=payload,
