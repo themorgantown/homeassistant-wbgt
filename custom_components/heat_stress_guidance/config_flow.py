@@ -260,7 +260,7 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional("qr"): selector.QrCodeSelector(
                     config=selector.QrCodeSelectorConfig(
                         data=payload,
-                        scale=6,
+                        scale=4,
                         error_correction_level=selector.QrErrorCorrectionLevel.QUARTILE,
                     )
                 ),
