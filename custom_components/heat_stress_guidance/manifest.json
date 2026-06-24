@@ -1,14 +1,14 @@
 {
   "domain": "heat_stress_guidance",
   "name": "Heat Stress Guidance",
-  "version": "1.0.0",
+  "after_dependencies": ["cloud", "mqtt", "owntracks"],
+  "codeowners": ["@themorgantown"],
+  "config_flow": true,
+  "dependencies": [],
   "documentation": "https://github.com/themorgantown/homeassistant-wbgt/blob/main/README.md",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/themorgantown/homeassistant-wbgt/issues",
   "quality_scale": "custom",
   "requirements": [],
-  "dependencies": [],
-  "after_dependencies": ["cloud", "mqtt", "owntracks"],
-  "codeowners": ["@themorgantown"],
-  "iot_class": "cloud_polling",
-  "config_flow": true
+  "version": "1.0.0"
 }
