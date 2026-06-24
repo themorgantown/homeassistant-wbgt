@@ -53,7 +53,8 @@
   "options": {
     "abort": {
       "owntracks_not_configured": "The OwnTracks integration is not set up. Add the OwnTracks integration in Home Assistant first, then reopen this QR code.",
-      "cloud_unavailable": "Could not determine a reachable webhook URL. Enable Home Assistant Cloud (Nabu Casa) or set an external URL, then try again."
+      "cloud_unavailable": "Could not determine a reachable webhook URL. Enable Home Assistant Cloud (Nabu Casa) or set an external URL, then try again.",
+      "owntracks_secret_unavailable": "The OwnTracks integration has no encryption secret, so an encrypted connection QR cannot be generated. Re-add the OwnTracks integration (it generates a secret on setup), then reopen this QR code."
     },
     "step": {
       "init": {

@@ -14,6 +14,7 @@ from .qr import (
     DEFAULT_DEVICE_ID,
     DEFAULT_TRACKER_ID,
     DEFAULT_USER,
+    EncryptionSecretUnavailable,
     OwnTracksNotConfigured,
     async_build_owntracks_qr_payload,
 )
@@ -258,6 +259,8 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="owntracks_not_configured")
         except CloudhookUnavailable:
             return self.async_abort(reason="cloud_unavailable")
+        except EncryptionSecretUnavailable:
+            return self.async_abort(reason="owntracks_secret_unavailable")
 
         # Remember what this QR encodes so the next submit can tell "regenerate
         # with a changed identity" apart from "done, close the dialog".

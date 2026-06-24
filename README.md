@@ -144,6 +144,34 @@ To find a valid entity, go to **Developer Tools → States**, open the `person.*
 
 If the mobile device has location sharing disabled, has not reported yet, or only reports a zone name without GPS attributes, the integration will show `unavailable` until Home Assistant has a current GPS fix.
 
+##### Linking a phone with the OwnTracks QR code
+
+If you don't already have a phone reporting location to Home Assistant, this integration can generate a QR code that configures the free [**OwnTracks**](https://owntracks.org) app to send GPS to your HA instance. Scanning it sets everything up — you do **not** type any server address, username, or key into the app by hand.
+
+**Before you scan — one prerequisite:** add the built‑in **OwnTracks integration** first (**Settings → Devices & Services → Add Integration → OwnTracks**). That integration owns the webhook the phone posts to. If it isn't present, the QR step stops with *"The OwnTracks integration is not set up."* (Over [Nabu Casa](https://www.nabucasa.com) the phone reaches HA through a cloudhook, so it works away from home; without a cloud subscription the QR encodes the local webhook URL, which only works on your LAN.)
+
+**Generate and scan:**
+
+1. **Settings → Devices & Services → Heat Stress Guidance → Configure → Show connection QR code.**
+2. Optionally edit the identity fields shown above the QR before scanning (see table below). Submitting with the fields unchanged just closes the dialog; changing one regenerates the QR.
+3. In the OwnTracks app, tap **Scan QR code** (top of Settings) and point it at the code. The app switches itself to HTTP mode pointed at your HA instance and confirms the imported configuration.
+
+| Field | Default | What it becomes |
+|---|---|---|
+| username | `worker` | first half of the entity name / OwnTracks `X-Limit-U` |
+| device id | `phone` | second half of the entity name / `X-Limit-D` |
+| tracker id | `w` | 1–2 character label shown on the map |
+
+The connection is always **end-to-end encrypted** — the QR carries the OwnTracks integration's encryption key, so payloads are encrypted on the phone (libsodium) and decrypted in Home Assistant. No password or token is exchanged.
+
+**What to insert into `tracked_entity`:** after the phone publishes its first location (move it, or tap *Publish* in the app), the OwnTracks integration creates a tracker named from the two fields above:
+
+```
+device_tracker.<username>_<device id>
+```
+
+So with the defaults you'd enter **`device_tracker.worker_phone`** here. Confirm it exists and has `latitude`/`longitude` under **Developer Tools → States** before selecting it. (If you blank out the username in the app, OwnTracks falls back to the literal `user` and an auto‑generated device id, producing an awkward name like `device_tracker.user_<uuid>` — regenerate the QR with the fields filled in to get a clean name.)
+
 ---
 
 #### `ha_sensors` mode
