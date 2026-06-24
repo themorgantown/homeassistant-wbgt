@@ -223,6 +223,7 @@ class HeatStressGuidanceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class HeatStressOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry) -> None:
         self._config_entry = config_entry
+        self._qr_identity = None
 
     async def async_step_init(self, user_input=None) -> FlowResult:
         return self.async_show_menu(
@@ -231,14 +232,24 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_show_qr(self, user_input=None) -> FlowResult:
-        user = DEFAULT_USER
-        device_id = DEFAULT_DEVICE_ID
-        tracker_id = DEFAULT_TRACKER_ID
         if user_input is not None:
-            user = (user_input.get("user") or "").strip() or DEFAULT_USER
-            device_id = (user_input.get("deviceid") or "").strip() or DEFAULT_DEVICE_ID
-            tracker_id = (user_input.get("trackerid") or "").strip() or DEFAULT_TRACKER_ID
+            identity = (
+                (user_input.get("user") or "").strip() or DEFAULT_USER,
+                (user_input.get("deviceid") or "").strip() or DEFAULT_DEVICE_ID,
+                (user_input.get("trackerid") or "").strip() or DEFAULT_TRACKER_ID,
+            )
+            # Submitting without changing any identity field means "I'm done" —
+            # finish the flow so the dialog closes (preserving existing options),
+            # instead of re-rendering the same QR forever. Editing a field and
+            # resubmitting falls through below to regenerate the QR.
+            if identity == self._qr_identity:
+                return self.async_create_entry(
+                    title="", data=dict(self._config_entry.options)
+                )
+        else:
+            identity = (DEFAULT_USER, DEFAULT_DEVICE_ID, DEFAULT_TRACKER_ID)
 
+        user, device_id, tracker_id = identity
         try:
             payload = await async_build_owntracks_qr_payload(
                 self.hass, user=user, device_id=device_id, tracker_id=tracker_id
@@ -248,9 +259,9 @@ class HeatStressOptionsFlow(config_entries.OptionsFlow):
         except CloudhookUnavailable:
             return self.async_abort(reason="cloud_unavailable")
 
-        # Editing an identity field and resubmitting regenerates the QR; there is
-        # nothing to persist, so the step just re-renders. The user closes the
-        # dialog when done.
+        # Remember what this QR encodes so the next submit can tell "regenerate
+        # with a changed identity" apart from "done, close the dialog".
+        self._qr_identity = identity
         return self.async_show_form(
             step_id="show_qr",
             data_schema=vol.Schema({
