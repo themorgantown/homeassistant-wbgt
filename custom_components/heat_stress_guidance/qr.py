@@ -1,6 +1,6 @@
 """Build the OwnTracks scan-to-link QR payload.
 
-The QR encodes a complete ``owntracks://config?inline=<base64-json>`` URL. When
+The QR encodes a complete ``owntracks:///config?inline=<base64-json>`` URL. When
 scanned by the OwnTracks iOS app it is handed straight to that app's existing
 config-import pipeline (``processURIConfig:`` -> ``configFromDictionary:``), which
 switches the app to HTTP mode pointing at this Home Assistant instance.
@@ -56,7 +56,7 @@ async def async_build_owntracks_qr_payload(
     device_id: str = DEFAULT_DEVICE_ID,
     tracker_id: str = DEFAULT_TRACKER_ID,
 ) -> str:
-    """Build the ``owntracks://config?inline=...`` URL to encode in the QR code."""
+    """Build the ``owntracks:///config?inline=...`` URL to encode in the QR code."""
     entries = hass.config_entries.async_entries(OWNTRACKS_DOMAIN)
     if not entries:
         raise OwnTracksNotConfigured
@@ -85,4 +85,7 @@ async def async_build_owntracks_qr_payload(
     inline = base64.b64encode(
         json.dumps(config, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
-    return f"owntracks://config?inline={inline}"
+    # Canonical OwnTracks deeplink: empty authority + "/config" path
+    # (owntracks:///config?...). The triple slash matters — owntracks://config
+    # parses as host="config" with an empty path, which the app rejects.
+    return f"owntracks:///config?inline={inline}"
