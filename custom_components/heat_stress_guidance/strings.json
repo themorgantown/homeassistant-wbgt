@@ -70,7 +70,7 @@
       },
       "show_qr": {
         "title": "OwnTracks connection QR code",
-        "description": "Scan this in the OwnTracks app: open OwnTracks → Settings → Scan QR code. It configures OwnTracks to send location to this Home Assistant instance over the OwnTracks webhook — no typing required. Edit the identity fields and resubmit to regenerate the code.\n\n⚠️ Treat this code like a password: anyone who scans or screenshots it can submit location for this worker. Don't share or store the image; scan it once, then close this dialog. If it leaks, rotate the connection by deleting and re-adding the OwnTracks integration.\n\nWhen you finish, this worker is monitored using the scanned phone's location (device_tracker.<username>_<device id>). Untick the option below to keep the current location source instead.",
+        "description": "Scan this in the OwnTracks app: open OwnTracks → Settings → Scan QR code. It configures OwnTracks to send location to this Home Assistant instance over the OwnTracks webhook — no typing required. Edit the identity fields and resubmit to regenerate the code.\n\n⚠️ Treat this code like a password: anyone who scans or screenshots it can submit location for this worker. Don't share or store the image; scan it once, then close this dialog. If it leaks, rotate the connection by deleting and re-adding the OwnTracks integration.\n\nWhen you finish, this worker is monitored using the scanned phone's location (device_tracker.{username}_{device_id}). Untick the option below to keep the current location source instead.",
         "data": {
           "user": "Username",
           "deviceid": "Device ID",
